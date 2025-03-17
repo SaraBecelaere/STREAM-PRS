@@ -97,7 +97,7 @@ To use the PRS pipeline, you need to edit the STREAM-PRS.bash file. Below you wi
 - GWAS_file: fill in the full path to the GWAS summary statistics file you want to use, where the variant IDs are stored as chr_pos_ID
 - GWAS_file_rsID: fill in the full path to the GWAS summary statistics file you want to use, where the variant IDs are stored as rsID
 
-*Note: if the GWAS summary statistics file you use for chr_pos_ID and rsID are the same, use the same file for GWAS_file and GWAS_file_rsID*
+*Note: if the GWAS summary statistics file you use has chr_pos_ID and rsID already provided, use the same file for GWAS_file and GWAS_file_rsID*
 
 #### GWAS column names
 
@@ -122,18 +122,18 @@ To use the PRS pipeline, you need to edit the STREAM-PRS.bash file. Below you wi
 *Note: training data should be in plink .bed, .bim, .fam format*
 
 - training_file: fill in the full path to the training plink files in chr_pos variant ID format
-- training_file_prefix: fill in plink file prefix (only prefix!!) of the training data in chr_pos variant ID format
+- training_file_prefix: fill in plink file *prefix* of the training data in chr_pos variant ID format
 - training_file_rsID: fill in the full path to the training plink files in rsID variant ID format
-- training_file_rsID_prefix: fill in plink file prefix (only prefix!!) of the training data in rsID variant ID format
+- training_file_rsID_prefix: fill in plink file *prefix* of the training data in rsID variant ID format
 
 #### Test data
 
 *Note: test data should be in plink .bed, .bim, .fam format*
 
 - test_file: fill in the full path to the test plink files in chr_pos variant ID format
-- test_file_prefix: fill in plink file prefix (only prefix!!) of the test data in chr_pos variant ID format
+- test_file_prefix: fill in plink file *prefix* of the test data in chr_pos variant ID format
 - test_file_rsID: fill in the full path to the test plink files in rsID variant ID format
-- test_file_rsID_prefix: fill in plink file prefix (only prefix!!) of the test data in rsID variant ID format
+- test_file_rsID_prefix: fill in plink file *prefix* of the test data in rsID variant ID format
 
 #### Phenotype file
 
@@ -156,37 +156,37 @@ To use the PRS pipeline, you need to edit the STREAM-PRS.bash file. Below you wi
 
 *Note: all PRSice parameters are optional to adapt.*
 
-- pval_thresholds: fill in a comma separated list of P-value thresholds to test (default: 5e-08,1e-05,0.0001,0.001,0.05,0.1,0.5,1).
-- clumpkb: fill in the size of the window that should be used for clumping, in kb (default: 250).
-- clumpp: fill in the p-values that should be considered while clumping (default: 1.000000).
-- clumpr2: fill in the correlation coefficient between the SNPs that is tolerated for clumping (default: 0.100000).
+- pval_thresholds: fill in a comma separated list of P-value thresholds to test (default: 5e-08,1e-05,0.0001,0.001,0.05,0.1,0.5,1)
+- clumpkb: fill in the size of the window that should be used for clumping, in kb (default: 250)
+- clumpp: fill in the p-values that should be considered while clumping (default: 1.000000)
+- clumpr2: fill in the correlation coefficient between the SNPs that is tolerated for clumping (default: 0.100000)
 
 #### Lassosum specific parameters
 
 *Note: Make sure that you specify ld_blocks_lasso and that it matches your population of interest and the genome build of your data. lasso_thresholding_values and lambda_values can be adapted, but this is optional.*
 
-- ld_blocks_lasso: fill in which LD blocks you want to use (default: EUR.hg38).
+- ld_blocks_lasso: fill in which LD blocks you want to use (default: EUR.hg38)
 - lasso_thresholding_values: fill in a comma separated list of shrinkage values that should be tested (default: 0.1,0.2,0.4,0.5,0.7,0.9,1)
-- lambda_values: fill in which lambda values should be tested (default: "exp(seq(log(0.001), log(0.1), length.out = 20))").
+- lambda_values: fill in which lambda values should be tested (default: "exp(seq(log(0.001), log(0.1), length.out = 20))")
 
 #### PRS-CS specific parameters
 
 *Note: Make sure that you specify reference_files_PRScs, adapting phi_values is optional.*
 
 - reference_files_PRScs: fill in the full path to the directory that contains the reference files for PRS-CS
-- phi_values: fill in a comma separated list of phi values that should be tested (default: 1e+00,1e-02,1e-04,1e-06).
+- phi_values: fill in a comma separated list of phi values that should be tested (default: 1e+00,1e-02,1e-04,1e-06)
 
 #### LDpred2 and lassosum2 specific parameters
 
 *Note: Make sure that you specifiy ldref_hm3_plus, adapting the other parameters is optional.*
 
 - ldref_hm3_plus: fill in the full path to the directory that contains the LD reference matrices for LDpred2 and lassosum2
-- values_h2_grid: fill in a list of values that will be used to change the estimated heritability value in the grid model (default: "c(0.3, 0.7, 1, 1.4)").
-- values_p_grid: fill in which values for the proportion of causal variants (p) should be tested in the grid model (default: "seq_log(1e-5, 1, length.out = 21)").
-- initial_p_auto_grid: fill in which initial values for p should be tested in the auto grid model (default: "seq_log(1e-4, 0.2, length.out = 30)").
-- delta: fill in which shrinkage values should be tested (default: "c(0.001, 0.01, 0.1, 1)").
-- nlambda: fill in how many lambda values should be tested (default: 30).
-- lambda_min_ratio: fill in what the minimum ratio between lambda values should be (default: 0.01).
+- values_h2_grid: fill in a list of values that will be used to change the estimated heritability value in the grid model (default: "c(0.3, 0.7, 1, 1.4)")
+- values_p_grid: fill in which values for the proportion of causal variants (p) should be tested in the grid model (default: "seq_log(1e-5, 1, length.out = 21)")
+- initial_p_auto_grid: fill in which initial values for p should be tested in the auto grid model (default: "seq_log(1e-4, 0.2, length.out = 30)")
+- delta: fill in which shrinkage values should be tested (default: "c(0.001, 0.01, 0.1, 1)")
+- nlambda: fill in how many lambda values should be tested (default: 30)
+- lambda_min_ratio: fill in what the minimum ratio between lambda values should be (default: 0.01)
 
 ### Run STREAM-PRS
 
@@ -202,18 +202,62 @@ bash STREAM-PRS.bash
 
 The file starts with all the parameters that should be filled in (see above). Then, it runs the following scripts sequentially:
 
-- edit_GWAS.r: performs basic editing of the GWAS summary statistics files and creates the correctly formatted files that will serve as input for STREAM-PRS
-- prsice.bash: runs PRSice-2
-- lassosum.r: runs lassosum
-- PRS_CS.bash: runs PRS-CS
-- LDpred2_and_lassosum2.r: runs LDpred2 and lassosum2
-- get_best_PRS.r **OR** get_best_PRS_linear.r (depending on if the phenotype is indicated to be binary or not): PC-corrects and standardizes all scores. Then selects the best score per tool and across all tools.
+- `edit_GWAS.r`: performs basic editing of the GWAS summary statistics files and creates the correctly formatted files that will serve as input for STREAM-PRS
+- `prsice.bash`: runs PRSice-2
+- `lassosum.r`: runs lassosum
+- `PRS_CS.bash`: runs PRS-CS
+- `LDpred2_and_lassosum2.r`: runs LDpred2 and lassosum2
+- `get_best_PRS.r` **OR** `get_best_PRS_linear.r` (depending on if the phenotype is indicated to be binary or not): PC-corrects and standardizes all scores. Then selects the best score per tool and across all tools.
 
-*Note: if STREAM-PRS crashed midway one of the scripts, you can put a '#' in front of the scripts that already ran successfully. To run get_best_PRS.r or get_best_PRS_linear.r scores should be available for **ALL FIVE TOOLS**.
+#### Note on LDpred2 and lassosum2
+
+For some GWAS, an additional filtering step is necessary to get results from LDpred2 and lassosum2. For this reason, an additional script is provided: `LDpred2_and_lassosum2_extra_QC.r`. In the STREAM-PRS.bash script, just replace `LDpred2_and_lassosum2.r` with `LDpred2_and_lassosum2_extra_QC.r`.
+
+For this step, allele frequencies of the effect allele are necessary (see parameters above).
+
+## Output files
+
+Various output files can be found for each tool in the corresponding folders and in the comparison folder. Below we give an overview of the files that are created per tool and overall in the comparison folder.
+
+### Output files per tool
+
+- Raw scores for the training and the test data
+- PC-corrected and standardized scores for the training (training_prefix_scaled_scores) and test data (test_prefix_scaled_scores)
+- Regression_results_Tool: contains for each parameter setting the Beta, standard error (SE), P_value, Odds ratio (OR), confidence interval (CI_low and CI_up), variance explained (R2). Example for PRSice results:
+
+```
+Tool      Parameters    Beta        SE            P_value       OR            CI_low        CI_up       R2
+PRSice    Pt_5e.08      0.04904     0.11599       0.06724       1.05026       0.93734       1.32003     0.00408
+PRSice    Pt_1e.05      0.07161     0.11696       0.05403       1.09308       0.94100       1.17275     0.00839
+PRSice    Pt_0.0001     0.09698     0.11587       0.04026       1.10184       1.07858       1.38445     0.01573
+``` 
+
+- bar_plot_R2_Tool.svg: bar plot that shows the R² per parameter setting
+- ROC_curve.svg: ROC curve of the best parameter setting
+- best_PRS_Tool: file containing the PC-corrected and standardized score for each individual in the test dataset, for the best parameter settings only. Example:
+
+```
+FID     IID     score                   Tool    parameters
+0001    0001    -1.97750899840416       PRSice  Pt_0.1
+0002    0002    1.0169157692816         PRSice  Pt_0.1
+0003    0003    -0.242558849082638      PRSice  Pt_0.1
+0004    0004    0.146629989738331       PRSice  Pt_0.1
+```
+
+- Boxplot_Tool.svg (for binary traits only): Boxplot showing the scores of cases vs. controls, only for the best parameter settings
+- Histogram_best_score_Tool.svg (for binary traits only): Histogram showing the scores of cases vs. controls, only for the best parameter settings
+- Correlation.svg (for quantitative traits only): Correlation between PC-corrected and standardized PRS and the phenotype of the individuals
+
+### Output files in comparison folder
+
+- Regression_results_best_per_tool: contains for the best parameter settings per tool the beta, SE, P_value, OR, CI_low, CI_up and R2
+- Bar_plot_comparison_R2_per_tool.svg: figure with the R² per tool shown as a bar plot
+- Summary_AUC_per_tool.txt: contains for the best parameter settings per tool the AUC and it's 95% confidence interval (CI_low and CI_up)
+- ROC_comparison.svg: ROC plot with one curve per tool
 
 ## Citation
 
-If you use STREAM-PRS, please cite our paper. Becelaere S. et al. STREAM-PRS: A multi-tool pipeline for streamlining Polygenic Risk Score computation (2025). Currently, the paper is not yet published.
+If you use STREAM-PRS, please cite our paper. Becelaere S., Abakkouy Y. et al. STREAM-PRS: A multi-tool pipeline for streamlining Polygenic Risk Score computation (2025). Currently, the paper is not yet published.
 
 ## Contact
 
