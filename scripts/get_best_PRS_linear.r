@@ -35,6 +35,9 @@ phi_values = args[15]
 
 cross_validation = args[16]
 
+covariates = args[17]
+cov_file = args[18]
+
 ##############################
 #######Define functions
 
@@ -85,8 +88,7 @@ barplot_gradient <- function(data, Pt, R2, P_value, all_scores, fill_color, out,
 
 correlation_plot <- function(data, x_var, y_var, point_color, out){
   #Compute correlation
-  spearman_cor <- cor(data[[x_var]], data[[y_var]], method = "spearman")
-  spearman_r2 <- round(spearman_cor^2, 3)
+  spearman_cor <- round(cor(data[[x_var]], data[[y_var]], method = "spearman"), digits=3)
   #Determine position for the annotation
   x_min <- min(data[[x_var]], na.rm = TRUE)
   y_max <- max(data[[y_var]], na.rm = TRUE)
@@ -95,7 +97,7 @@ correlation_plot <- function(data, x_var, y_var, point_color, out){
   plot <- ggplot(data=data, aes(x=!!sym(x_var), y=!!sym(y_var))) +
     geom_point(color=point_color) +
     geom_smooth(method="lm", se=F, color="grey", formula = y~x) +
-    annotate("text", x=x_min, y=y_max, label=paste0("Spearman R² = ", spearman_r2),
+    annotate("text", x=x_min, y=y_max, label=paste0("Spearman r = ", spearman_cor),
              hjust=0, vjust=1, size=4, color="black") +
     theme_minimal() +
     xlab("PRS") + ylab("PHENO")
@@ -120,6 +122,20 @@ colnames(pheno) <- c("FID", "IID", "PHENO")
 pheno <- pheno[!is.na(pheno$PHENO),]
 pheno$PHENO <- as.numeric(pheno$PHENO)
 
+if (cov_file != "" && file.exists(cov_file)) {
+  cov_data <- read.table(cov_file, header = T)
+  if(covariates != ""){
+    cov_analysis <- "TRUE"
+    covariate_list <- strsplit(covariates, ",")[[1]]
+  } else {
+    cat("No covariates given. \n")
+    cov_analysis <- "FALSE"
+  }
+  
+} else {
+  cat("No covariate file provided.\n")
+  cov_analysis <- "FALSE"
+}
 
 ##################
 #####PRSice#######
@@ -341,6 +357,23 @@ if (cross_validation=="FALSE"){
   "Fill in TRUE or FALSE for cross-validation"
 }
 
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  Regression_covariates <- data.frame(matrix(ncol=5, nrow=0))
+  for (covs in covariate_list){
+    PRS_test_PRSice_cov <- merge(best_PRS_PRSice, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_lm <- lm(full_form, data = PRS_test_PRSice_cov)
+    null_lm <- lm(null_form, data = PRS_test_PRSice_cov)
+    R2_full <- summary(full_lm)$adj.r.squared
+    R2_null <- summary(null_lm)$adj.r.squared
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("PRSice", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
+}
 
 #### Correlation best score and phenotype
 
@@ -471,7 +504,7 @@ if (cross_validation=="FALSE"){
     
     for (i in 1:length(scores)) {
       b <- scores[i]
-      thresh <- paste(b)  
+      thresh <- lambda[i]
       tip <- paste("PHENO", "~", b,sep="")
       alpha <- lm(tip, data = test_pheno)
       R2 <- summary(alpha)$adj.r.squared
@@ -504,7 +537,7 @@ if (cross_validation=="FALSE"){
     
     for (i in 1:length(scores)) {
       b <- scores[i]
-      thresh <- paste(b)  
+      thresh <- lambda[i]
       tip <- paste("PHENO", "~", b,sep="")
       alpha <- lm(tip, data = test_pheno)
       R2 <- summary(alpha)$adj.r.squared
@@ -544,7 +577,7 @@ if (cross_validation=="FALSE"){
     data <- Regression_results_lasso[(Regression_results_lasso$Shrink==a),]
     write.table(data, paste0(out_lasso, "/Regression_results_", a), row.names = F, quote = F, sep="\t")
     data$R2 <- as.numeric(data$R2)
-    barplot_gradient(data=data, Pt="Lambda", R2="R2", P_value="P_value", all_scores=scores, fill_color="cadetblue3", out=paste0(out_lasso, "/bar_plot_R2_lassosum_", a,".svg"), Tool=paste0("Lassosum: shrinkage ", a))
+    barplot_gradient(data=data, Pt="Lambda", R2="R2", P_value="P_value", all_scores=lambda, fill_color="cadetblue3", out=paste0(out_lasso, "/bar_plot_R2_lassosum_", a,".svg"), Tool=paste0("Lassosum: shrinkage ", a))
     data_valid <- data[(data$P_value < 0.05 & data$Beta > 0),]
     ##### Check if Regression_results_valid is empty
     if (nrow(data_valid) == 0) {
@@ -564,16 +597,22 @@ if (cross_validation=="FALSE"){
   sorted_regression_results_lasso <- best_models_lasso %>% arrange(desc(R2))
   best_s <- sorted_regression_results_lasso[1,1]
   best_lambda <- sorted_regression_results_lasso[1,2]
+  best_lambda_res_sc <- paste0(best_lambda, "_res_sc")
   
   best_PRS_lasso <- read.table(paste0(out_lasso, "/", test_prefix, "_", best_s, "_scaled_scores"), header=T)
   best_PRS_lasso <- merge(best_PRS_lasso, pheno, by=c("IID", "FID"))
-  col_select_lasso <- c("FID","IID", best_lambda, "PHENO")
+  col_select_lasso <- c("FID","IID", best_lambda_res_sc, "PHENO")
   best_PRS_lasso <- select(best_PRS_lasso, all_of(col_select_lasso))
   best_PRS_lasso$Tool <- "lassosum"
   best_PRS_lasso$parameters <- paste0(best_s, "_", best_lambda)
   colnames(best_PRS_lasso) <- c("FID","IID", "score", "PHENO", "Tool", "parameters")
   
-  write.table(best_PRS_lasso, paste0(out_lasso, "/best_PRS_lasso"), quote = F, row.names = F, sep="\t")
+  #### Write to new file
+  
+  col_select_lasso <- c("FID", "IID", "score", "Tool", "parameters")
+  selection_best_PRS_lasso <- select(best_PRS_lasso, all_of(col_select_lasso))
+  
+  write.table(selection_best_PRS_lasso, paste0(out_lasso, "/best_PRS_lasso"), quote = F, row.names = F, sep="\t")
   
   Regression_best_lasso <- sorted_regression_results_lasso[1,]
   Regression_best_lasso <- Regression_best_lasso[1,c(3:8)]
@@ -586,7 +625,7 @@ if (cross_validation=="FALSE"){
     data <- Regression_results_lasso[(Regression_results_lasso$Shrink==a),]
     write.table(data, paste0(out_lasso, "/Regression_results_", a), row.names = F, quote = F, sep="\t")
     data$R2_CV <- as.numeric(data$R2_CV)
-    barplot_gradient(data=data, Pt="Lambda", R2="R2_CV", P_value="P_value", all_scores=scores, fill_color="cadetblue3", out=paste0(out_lasso, "/bar_plot_R2_lassosum_", a,".svg"), Tool=paste0("Lassosum: shrinkage ", a))
+    barplot_gradient(data=data, Pt="Lambda", R2="R2_CV", P_value="P_value", all_scores=lambda, fill_color="cadetblue3", out=paste0(out_lasso, "/bar_plot_R2_lassosum_", a,".svg"), Tool=paste0("Lassosum: shrinkage ", a))
     data_valid <- data[(data$P_value < 0.05 & data$Beta > 0),]
     ##### Check if Regression_results_valid is empty
     if (nrow(data_valid) == 0) {
@@ -606,16 +645,22 @@ if (cross_validation=="FALSE"){
   sorted_regression_results_lasso <- best_models_lasso %>% arrange(desc(R2_CV))
   best_s <- sorted_regression_results_lasso[1,1]
   best_lambda <- sorted_regression_results_lasso[1,2]
+  best_lambda_res_sc <- paste0(best_lambda, "_res_sc")
   
   best_PRS_lasso <- read.table(paste0(out_lasso, "/", test_prefix, "_", best_s, "_scaled_scores"), header=T)
   best_PRS_lasso <- merge(best_PRS_lasso, pheno, by=c("IID", "FID"))
-  col_select_lasso <- c("FID","IID", best_lambda, "PHENO")
+  col_select_lasso <- c("FID","IID", best_lambda_res_sc, "PHENO")
   best_PRS_lasso <- select(best_PRS_lasso, all_of(col_select_lasso))
   best_PRS_lasso$Tool <- "lassosum"
   best_PRS_lasso$parameters <- paste0(best_s, "_", best_lambda)
   colnames(best_PRS_lasso) <- c("FID","IID", "score", "PHENO", "Tool", "parameters")
   
-  write.table(best_PRS_lasso, paste0(out_lasso, "/best_PRS_lasso"), quote = F, row.names = F, sep="\t")
+  #### Write to new file
+  
+  col_select_lasso <- c("FID", "IID", "score", "Tool", "parameters")
+  selection_best_PRS_lasso <- select(best_PRS_lasso, all_of(col_select_lasso))
+  
+  write.table(selection_best_PRS_lasso, paste0(out_lasso, "/best_PRS_lasso"), quote = F, row.names = F, sep="\t")
   
   Regression_best_lasso <- sorted_regression_results_lasso[1,]
   Regression_best_lasso <- Regression_best_lasso[1,c(3:9)]
@@ -623,6 +668,25 @@ if (cross_validation=="FALSE"){
 } else {
   "Fill in TRUE or FALSE for cross-validation"
 }
+
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  for (covs in covariate_list){
+    PRS_test_lasso_cov <- merge(best_PRS_lasso, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_lm <- lm(full_form, data = PRS_test_lasso_cov)
+    null_lm <- lm(null_form, data = PRS_test_lasso_cov)
+    R2_full <- summary(full_lm)$adj.r.squared
+    R2_null <- summary(null_lm)$adj.r.squared
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("lassosum", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
+}
+
+#### Correlation plot
 
 correlation_plot(data=best_PRS_lasso, x_var="score", y_var="PHENO", point_color="mediumpurple", out=paste0(out_lasso, "/Correlation_plot_lassosum.svg"))
 
@@ -859,6 +923,23 @@ if (cross_validation=="FALSE"){
   
 } else {
   "Fill in TRUE or FALSE for cross-validation"
+}
+
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  for (covs in covariate_list){
+    PRS_test_PRS_CS_cov <- merge(best_PRS_PRS_CS, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_lm <- lm(full_form, data = PRS_test_PRS_CS_cov)
+    null_lm <- lm(null_form, data = PRS_test_PRS_CS_cov)
+    R2_full <- summary(full_lm)$adj.r.squared
+    R2_null <- summary(null_lm)$adj.r.squared
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("PRS-CS", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
 }
 
 #### Correlation plot
@@ -1137,7 +1218,7 @@ if (cross_validation=="FALSE"){
   Regression_results_inf <- data.frame(matrix(ncol=7, nrow=0))
   for (i in 1:length(scores_regr_inf)) {
     b <- scores_regr_inf[i]
-    thresh <- paste(b)  
+    thresh <- "pred_inf" 
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_inf_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1158,7 +1239,7 @@ if (cross_validation=="FALSE"){
   train_control <- trainControl(method = "cv", number = 10)
   for (i in 1:length(scores_regr_inf)) {
     b <- scores_regr_inf[i]
-    thresh <- paste(b)  
+    thresh <- "pred_inf"  
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_inf_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1188,7 +1269,7 @@ if (cross_validation=="FALSE"){
   Regression_results_grid <- data.frame(matrix(ncol=7, nrow=0))
   for (i in 1:length(scores_regr_grid)) {
     b <- scores_regr_grid[i]
-    thresh <- paste(b)  
+    thresh <- scores_grid_2[i]
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_grid_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1210,7 +1291,7 @@ if (cross_validation=="FALSE"){
   train_control <- trainControl(method = "cv", number = 10)
   for (i in 1:length(scores_regr_grid)) {
     b <- scores_regr_grid[i]
-    thresh <- paste(b)  
+    thresh <- scores_grid_2[i] 
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_grid_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1241,7 +1322,7 @@ if (cross_validation=="FALSE"){
   Regression_results_auto_grid <- data.frame(matrix(ncol=7, nrow=0))
   for (i in 1:length(scores_regr_auto_grid)) {
     b <- scores_regr_auto_grid[i]
-    thresh <- paste(b)  
+    thresh <- scores_auto_grid_2[i]
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_auto_grid_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1263,7 +1344,7 @@ if (cross_validation=="FALSE"){
   train_control <- trainControl(method = "cv", number = 10)
   for (i in 1:length(scores_regr_auto_grid)) {
     b <- scores_regr_auto_grid[i]
-    thresh <- paste(b)  
+    thresh <- scores_auto_grid_2[i]
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_auto_grid_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1293,7 +1374,7 @@ if (cross_validation=="FALSE"){
   Regression_results_auto <- data.frame(matrix(ncol=7, nrow=0))
   for (i in 1:length(scores_regr_auto)) {
     b <- scores_regr_auto[i]
-    thresh <- paste(b)  
+    thresh <- "pred_auto"
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_auto_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1315,7 +1396,7 @@ if (cross_validation=="FALSE"){
   train_control <- trainControl(method = "cv", number = 10)
   for (i in 1:length(scores_regr_auto)) {
     b <- scores_regr_auto[i]
-    thresh <- paste(b)  
+    thresh <- "pred_auto"
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_auto_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1347,13 +1428,13 @@ if (cross_validation=="FALSE"){
 if (cross_validation=="FALSE"){
   bar_plot <- ggplot(data=Regression_results_inf, aes(x=Parameters, y=R2)) +
     geom_bar(stat = "identity", position = "dodge", fill="cadetblue3") +
-    scale_x_discrete(limits=scores_regr_inf, guide = guide_axis(angle = 90)) +
+    scale_x_discrete(limits="pred_inf", guide = guide_axis(angle = 90)) +
     xlab("") + ylab("R²") +theme_minimal() + ggtitle("LDpred2 - inf model")
   ggsave(paste0(out_LDpred2, "/bar_plot_R2_LDpred2_inf.svg"), bar_plot, width=7, height=7)
 } else if (cross_validation=="TRUE"){
   bar_plot <- ggplot(data=Regression_results_inf, aes(x=Parameters, y=R2_CV)) +
     geom_bar(stat = "identity", position = "dodge", fill="cadetblue3") +
-    scale_x_discrete(limits=scores_regr_inf, guide = guide_axis(angle = 90)) +
+    scale_x_discrete(limits="pred_inf", guide = guide_axis(angle = 90)) +
     xlab("") + ylab("R²") +theme_minimal() + ggtitle("LDpred2 - inf model")
   ggsave(paste0(out_LDpred2, "/bar_plot_R2_LDpred2_inf.svg"), bar_plot, width=7, height=7)
 } else {
@@ -1363,9 +1444,9 @@ if (cross_validation=="FALSE"){
 ##### Grid
 
 if (cross_validation=="FALSE"){
-  barplot_gradient(data=Regression_results_grid, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_regr_grid, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_grid.svg"), Tool="LDpred2 - grid model")
+  barplot_gradient(data=Regression_results_grid, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_grid_2, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_grid.svg"), Tool="LDpred2 - grid model")
 } else if (cross_validation=="TRUE"){
-  barplot_gradient(data=Regression_results_grid, Pt="Parameters", R2="R2_CV", P_value="P_value", all_scores=scores_regr_grid, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_grid.svg"), Tool="LDpred2 - grid model")
+  barplot_gradient(data=Regression_results_grid, Pt="Parameters", R2="R2_CV", P_value="P_value", all_scores=scores_grid_2, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_grid.svg"), Tool="LDpred2 - grid model")
 } else {
   "Fill in TRUE or FALSE for cross-validation"
 }
@@ -1373,9 +1454,9 @@ if (cross_validation=="FALSE"){
 ##### Auto grid
 
 if (cross_validation=="FALSE"){
-  barplot_gradient(data=Regression_results_auto_grid, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_regr_auto_grid, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_auto_grid.svg"), Tool="LDpred2 - auto grid model")
+  barplot_gradient(data=Regression_results_auto_grid, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_auto_grid_2, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_auto_grid.svg"), Tool="LDpred2 - auto grid model")
 } else if (cross_validation=="TRUE"){
-  barplot_gradient(data=Regression_results_auto_grid, Pt="Parameters", R2="R2_CV", P_value="P_value", all_scores=scores_regr_auto_grid, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_auto_grid.svg"), Tool="LDpred2 - auto grid model")
+  barplot_gradient(data=Regression_results_auto_grid, Pt="Parameters", R2="R2_CV", P_value="P_value", all_scores=scores_auto_grid_2, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_auto_grid.svg"), Tool="LDpred2 - auto grid model")
 } else {
   "Fill in TRUE or FALSE for cross-validation"
 }
@@ -1385,13 +1466,13 @@ if (cross_validation=="FALSE"){
 if (cross_validation=="FALSE"){
   bar_plot <- ggplot(data=Regression_results_auto, aes(x=Parameters, y=R2)) +
     geom_bar(stat = "identity", position = "dodge", fill="cadetblue3") +
-    scale_x_discrete(limits=scores_regr_auto, guide = guide_axis(angle = 90)) +
+    scale_x_discrete(limits="pred_auto", guide = guide_axis(angle = 90)) +
     xlab("") + ylab("Nagelkerke R2") +theme_minimal() + ggtitle("LDpred2 - auto model")
   ggsave(paste0(out_LDpred2, "/bar_plot_R2_LDpred2_auto.svg"), bar_plot, width=7, height=7)
 } else if (cross_validation=="TRUE"){
   bar_plot <- ggplot(data=Regression_results_auto, aes(x=Parameters, y=R2_CV)) +
     geom_bar(stat = "identity", position = "dodge", fill="cadetblue3") +
-    scale_x_discrete(limits=scores_regr_auto, guide = guide_axis(angle = 90)) +
+    scale_x_discrete(limits="pred_auto", guide = guide_axis(angle = 90)) +
     xlab("") + ylab("Nagelkerke R2") +theme_minimal() + ggtitle("LDpred2 - auto model")
   ggsave(paste0(out_LDpred2, "/bar_plot_R2_LDpred2_auto.svg"), bar_plot, width=7, height=7)
 } else {
@@ -1415,6 +1496,7 @@ if (cross_validation=="FALSE"){
   
   best_model <- sorted_regression_results_LDpred2[1,1]
   best_parameters <- sorted_regression_results_LDpred2[1,2]
+  best_parameters_res_sc <- paste0(best_parameters, "_res_sc")
   
   best_model_LDpred2 <- switch(
     best_model,
@@ -1425,7 +1507,7 @@ if (cross_validation=="FALSE"){
     stop("Invalid best_model value")
   )
   
-  col_select_LDpred2 <- c("FID","IID", best_parameters, "PHENO")
+  col_select_LDpred2 <- c("FID","IID", best_parameters_res_sc, "PHENO")
   best_PRS_LDpred2 <- select(best_model_LDpred2, all_of(col_select_LDpred2))
   best_PRS_LDpred2$Tool <- paste0("LDpred2_", best_model)
   best_PRS_LDpred2$parameters <- best_parameters
@@ -1451,6 +1533,7 @@ if (cross_validation=="FALSE"){
   
   best_model <- sorted_regression_results_LDpred2[1,1]
   best_parameters <- sorted_regression_results_LDpred2[1,2]
+  best_parameters_res_sc <- paste0(best_parameters, "_res_sc")
   
   best_model_LDpred2 <- switch(
     best_model,
@@ -1461,7 +1544,7 @@ if (cross_validation=="FALSE"){
     stop("Invalid best_model value")
   )
   
-  col_select_LDpred2 <- c("FID","IID", best_parameters, "PHENO")
+  col_select_LDpred2 <- c("FID","IID", best_parameters_res_sc, "PHENO")
   best_PRS_LDpred2 <- select(best_model_LDpred2, all_of(col_select_LDpred2))
   best_PRS_LDpred2$Tool <- paste0("LDpred2_", best_model)
   best_PRS_LDpred2$parameters <- best_parameters
@@ -1479,6 +1562,23 @@ if (cross_validation=="FALSE"){
   Regression_best_per_tool <- rbind(Regression_best_per_tool, Regression_best_LDpred2)
 } else {
   "Fill in TRUE or FALSE for cross-validation"
+}
+
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  for (covs in covariate_list){
+    PRS_test_LDpred2_cov <- merge(best_PRS_LDpred2, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_lm <- lm(full_form, data = PRS_test_LDpred2_cov)
+    null_lm <- lm(null_form, data = PRS_test_LDpred2_cov)
+    R2_full <- summary(full_lm)$adj.r.squared
+    R2_null <- summary(null_lm)$adj.r.squared
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("LDpred2", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
 }
 
 #### Correlation plot
@@ -1579,7 +1679,7 @@ if (cross_validation=="FALSE"){
   Regression_results_lasso2 <- data.frame(matrix(ncol=6, nrow=0))
   for (i in 1:length(scores_regr_lasso2)) {
     b <- scores_regr_lasso2[i]
-    thresh <- paste(b)  
+    thresh <- scores_lasso2_2[i]
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_lasso2_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1600,7 +1700,7 @@ if (cross_validation=="FALSE"){
   train_control <- trainControl(method = "cv", number = 10)
   for (i in 1:length(scores_regr_lasso2)) {
     b <- scores_regr_lasso2[i]
-    thresh <- paste(b)  
+    thresh <- scores_lasso2_2[i]
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- lm(tip, data = PRS_lasso2_for_regression)
     R2 <- summary(alpha)$adj.r.squared
@@ -1626,9 +1726,9 @@ if (cross_validation=="FALSE"){
 #### Make bar plot
 
 if (cross_validation=="FALSE"){
-  barplot_gradient(data=Regression_results_lasso2, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_regr_lasso2, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_lassosum2.svg"), Tool="Lassosum2")
+  barplot_gradient(data=Regression_results_lasso2, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_lasso2_2, fill_color="cadetblue3", out=paste0(out_lasso2, "/bar_plot_R2_lassosum2.svg"), Tool="Lassosum2")
 } else if (cross_validation=="TRUE"){
-  barplot_gradient(data=Regression_results_lasso2, Pt="Parameters", R2="R2_CV", P_value="P_value", all_scores=scores_regr_lasso2, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_lassosum2.svg"), Tool="Lassosum2")
+  barplot_gradient(data=Regression_results_lasso2, Pt="Parameters", R2="R2_CV", P_value="P_value", all_scores=scores_lasso2_2, fill_color="cadetblue3", out=paste0(out_lasso2, "/bar_plot_R2_lassosum2.svg"), Tool="Lassosum2")
 } else {
   "Fill in TRUE or FALSE for cross-validation"
 }
@@ -1649,7 +1749,8 @@ if (cross_validation=="FALSE"){
   
   best_model <- sorted_regression_results_lasso2[1,1]
   best_parameters <- sorted_regression_results_lasso2[1,2]
-  col_select_lasso2 <- c("FID","IID", best_parameters, "PHENO")
+  best_parameters_res_sc <- paste0(best_parameters, "_res_sc")
+  col_select_lasso2 <- c("FID","IID", best_parameters_res_sc, "PHENO")
   best_PRS_lasso2 <- select(PRS_lasso2_for_regression, all_of(col_select_lasso2))
   best_PRS_lasso2$Tool <- best_model
   best_PRS_lasso2$parameters <- best_parameters
@@ -1675,7 +1776,8 @@ if (cross_validation=="FALSE"){
   
   best_model <- sorted_regression_results_lasso2[1,1]
   best_parameters <- sorted_regression_results_lasso2[1,2]
-  col_select_lasso2 <- c("FID","IID", best_parameters, "PHENO")
+  best_parameters_res_sc <- paste0(best_parameters, "_res_sc")
+  col_select_lasso2 <- c("FID","IID", best_parameters_res_sc, "PHENO")
   best_PRS_lasso2 <- select(PRS_lasso2_for_regression, all_of(col_select_lasso2))
   best_PRS_lasso2$Tool <- best_model
   best_PRS_lasso2$parameters <- best_parameters
@@ -1693,6 +1795,23 @@ if (cross_validation=="FALSE"){
   
 } else {
   "Fill in TRUE or FALSE for cross-validation"
+}
+
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  for (covs in covariate_list){
+    PRS_test_lasso2_cov <- merge(best_PRS_lasso2, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_lm <- lm(full_form, data = PRS_test_lasso2_cov)
+    null_lm <- lm(null_form, data = PRS_test_lasso2_cov)
+    R2_full <- summary(full_lm)$adj.r.squared
+    R2_null <- summary(null_lm)$adj.r.squared
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("lassosum2", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
 }
 
 #### Correlation plot
@@ -1737,6 +1856,15 @@ if (cross_validation=="FALSE"){
   
 } else {
   "Fill in TRUE or FALSE for cross-validation"
+}
+
+#### Write results of covariate analysis to file, if it existed
+
+if (exists("Regression_covariates") && nrow(Regression_covariates) > 0) {
+  Regression_covariates$R2_PRS_and_cov <- as.numeric(Regression_covariates$R2_PRS_and_cov)
+  Regression_covariates$R2_cov_only <- as.numeric(Regression_covariates$R2_cov_only)
+  Regression_covariates$R2_PRS_only <- as.numeric(Regression_covariates$R2_PRS_only)
+  write.table(Regression_covariates, paste0(out_comparison, "/Regression_best_PRS_per_tool_with_covariates"), row.names = F, quote = F, sep="\t")
 }
 
 cat("Done comparing tools!\nPipeline completed!\n")

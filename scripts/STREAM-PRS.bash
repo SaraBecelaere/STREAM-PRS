@@ -5,13 +5,13 @@
 #Parameters - to adapt
 
 #Tools
-PRSice_path=.""
+PRSice_path=""
 PRScs_path=""
 
 #Model 
 binary_trait="TRUE" #(TRUE=binary, FALSE=continuous)
 cross_validation="FALSE" #(TRUE=use cross validation, FALSE=don't use cross validation)
-covariates="" #Comma separated list of covariates to include in regression model
+covariates="" #Comma separated list of covariates to include in regression model e.g. "Age+Sex,Sex" will do regression analysis for PHENO ~ PRS + Age+Sex and for PHENO ~ PRS + Sex; if e.g. "Age,Sex" it will do regression analysis for PHENO ~ PRS + Age and for PHENO ~ PRS + Sex It will NOT do PHENO ~ PRS + Age + Sex; leave empty if you have no covariates.
 
 #Output path
 out="."
@@ -49,14 +49,14 @@ test_file_prefix=""
 test_file_rsID=""
 test_file_rsID_prefix=""
 
-#Phenotype file
+#Phenotype file (FID, IID, PHENO)
 pheno=""
 
-#PC files
+#PC files (FID, IID, PC1, PC2, ..., PCN)
 PC_training=""
 PC_test=""
 
-#Covariate file
+#Covariate file (FID, IID, cov_1, cov_2, ..., cov_N): this file is optional
 cov_file=""
 
 #Cores

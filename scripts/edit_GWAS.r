@@ -63,3 +63,4 @@ write.table(ss_2, paste0(sum.stat, "_edited_by_pipeline_for_LDpred2"), row.names
 
 write.table(PRS_CS, paste0(sum.stat, "_edited_by_pipeline_for_PRS_CS"), row.names = FALSE, quote = FALSE, sep="\t")
 cat("Edited GWAS for PRS-CS and LDpred2....\nEditing GWAS completed!\n")
+

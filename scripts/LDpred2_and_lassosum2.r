@@ -29,7 +29,7 @@ effect_A <- args[9]
 other_A <- args[10]
 N_col <- args[11]
 beta_se_col <- args[12]
-allele_freq_col <- args[13]
+#allele_freq_col <- args[13]
 out_LDpred2 <- args[14]
 out_lasso2 <- args[15]
 ldref_hm3_plus <- args[16]
@@ -65,7 +65,7 @@ sumstats$chr <- as.numeric(pull(sumstats, CHR_col))
 sumstats$pos <- pull(sumstats, POS_col)
 sumstats$a1 <- pull(sumstats, effect_A)
 sumstats$a0 <- pull(sumstats, other_A)
-sumstats$freq <- pull(sumstats, allele_freq_col)
+#sumstats$freq <- pull(sumstats, allele_freq_col)
 sumstats$n_eff <- pull(sumstats, N_col)
 sumstats$beta <- sumstats$beta_num
 sumstats$beta_se <- pull(sumstats, beta_se_col)

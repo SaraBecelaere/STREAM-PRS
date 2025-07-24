@@ -35,6 +35,9 @@ phi_values = args[15]
 
 cross_validation = args[16]
 
+covariates = args[17]
+cov_file = args[18]
+
 ##############################
 #######Define functions
 
@@ -98,6 +101,29 @@ histogram_case_control <- function(case, control, data, score, group, fill_color
   ggsave(out, plot, width=7, height=7)
 }
 
+density_case_control <- function(case, control, data, score, group, fill_color_1, fill_color_2, out){
+  plot <- ggplot(data = data, aes(x = !!sym(score), fill = !!sym(group))) +
+    geom_density(alpha = 0.5, position = "identity") +
+    theme_minimal() +
+    labs(x = "Scores", y = "Density") +
+    scale_fill_manual(values = c(fill_color_1, fill_color_2))
+  
+  # Estimate y-axis upper bound to align mean lines visually
+  density_data <- ggplot_build(plot)$data[[1]]
+  max_density <- max(density_data$y)
+  
+  mean_cases <- round(mean(case[[score]]), digits = 3)
+  mean_controls <- round(mean(control[[score]]), digits = 3)
+  
+  plot <- plot +
+    geom_line(data = tibble(x = c(mean_cases, mean_cases), y = c(0, max_density)), 
+              aes(x = x, y = y), inherit.aes = FALSE, color = fill_color_2, size = 1.25) +
+    geom_line(data = tibble(x = c(mean_controls, mean_controls), y = c(0, max_density)), 
+              aes(x = x, y = y), inherit.aes = FALSE, color = fill_color_1, size = 1.25)
+  
+  ggsave(out, plot, width = 7, height = 7)
+}
+
 #### Boxplot with dots
 
 boxplot_case_control <- function(data, pheno, score, fill_color_1, fill_color_2, out) {
@@ -142,6 +168,21 @@ pheno <- read.table(pheno_file, header=T)
 colnames(pheno) <- c("FID", "IID", "PHENO")
 pheno <- pheno[!is.na(pheno$PHENO),]
 pheno$PHENO <- as.factor(pheno$PHENO)
+
+if (cov_file != "" && file.exists(cov_file)) {
+  cov_data <- read.table(cov_file, header = T)
+  if(covariates != ""){
+    cov_analysis <- "TRUE"
+    covariate_list <- strsplit(covariates, ",")[[1]]
+  } else {
+    cat("No covariates given. \n")
+    cov_analysis <- "FALSE"
+  }
+  
+} else {
+  cat("No covariate file provided.\n")
+  cov_analysis <- "FALSE"
+}
 
 ##################
 #####PRSice#######
@@ -237,7 +278,7 @@ PRS_test_PRSice_pheno$PHENO <- as.factor(PRS_test_PRSice_pheno$PHENO)
 
 if (cross_validation=="FALSE"){
   
-  Regression_results_PRSice <- data.frame(matrix(ncol=9, nrow=0))
+  Regression_results_PRSice <- data.frame(matrix(ncol=10, nrow=0))
   
   for (i in 1:length(Pt_res_sc)) {
     a <- Pt_res_sc[i]
@@ -245,22 +286,24 @@ if (cross_validation=="FALSE"){
     tip <- paste("PHENO", "~", a,sep="")
     alpha <- glm(tip, data = PRS_test_PRSice_pheno, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
     beta <- coef(summary(alpha))[2,1]
     SE <- coef(summary(alpha))[2,2]
-    Regression_results_PRSice <- rbind(Regression_results_PRSice, c("PRSice",thresh,beta,SE,p,OR,CI,R2_full))
-    colnames(Regression_results_PRSice) <- c("Tool","Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2")
+    Regression_results_PRSice <- rbind(Regression_results_PRSice, c("PRSice",thresh,beta,SE,p,OR,CI,R2_full,R2_Cox))
+    colnames(Regression_results_PRSice) <- c("Tool","Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox")
   }
   
   Regression_results_PRSice$R2 <- as.numeric(Regression_results_PRSice$R2)
+  Regression_results_PRSice$R2_Cox <- as.numeric(Regression_results_PRSice$R2_Cox)
   Regression_results_PRSice$P_value <- as.numeric(Regression_results_PRSice$P_value)
   Regression_results_PRSice$P_value <- ifelse(Regression_results_PRSice$P_value==0, 3.4e-314, Regression_results_PRSice$P_value)
   
   write.table(Regression_results_PRSice, paste0(out_PRSice, "/Regression_results_PRSice"), row.names=F, quote=F, sep="\t")
 } else if (cross_validation=="TRUE"){
-  Regression_results_PRSice <- data.frame(matrix(ncol=10, nrow=0))
+  Regression_results_PRSice <- data.frame(matrix(ncol=11, nrow=0))
   train_control <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
   PRS_test_PRSice_pheno$PHENO_2 <- ifelse(PRS_test_PRSice_pheno$PHENO==0, "control", "case")
   for (i in 1:length(Pt_res_sc)) {
@@ -270,6 +313,7 @@ if (cross_validation=="FALSE"){
     tip_2 <- paste("PHENO_2", "~", a, sep="")
     alpha <- glm(tip, data = PRS_test_PRSice_pheno, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
@@ -277,11 +321,12 @@ if (cross_validation=="FALSE"){
     SE <- coef(summary(alpha))[2,2]
     model <- train(as.formula(tip_2), data=PRS_test_PRSice_pheno, method="glm", trControl=train_control, metric="ROC")
     AUC_CV <- (model$results$ROC)
-    Regression_results_PRSice <- rbind(Regression_results_PRSice, c("PRSice",thresh,beta,SE,p,OR,CI,R2_full, AUC_CV))
-    colnames(Regression_results_PRSice) <- c("Tool","Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "AUC_CV")
+    Regression_results_PRSice <- rbind(Regression_results_PRSice, c("PRSice",thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,AUC_CV))
+    colnames(Regression_results_PRSice) <- c("Tool","Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","AUC_CV")
   }
   
   Regression_results_PRSice$R2 <- as.numeric(Regression_results_PRSice$R2)
+  Regression_results_PRSice$R2_Cox <- as.numeric(Regression_results_PRSice$R2_Cox)
   Regression_results_PRSice$P_value <- as.numeric(Regression_results_PRSice$P_value)
   Regression_results_PRSice$P_value <- ifelse(Regression_results_PRSice$P_value==0, 3.4e-314, Regression_results_PRSice$P_value)
   
@@ -289,8 +334,6 @@ if (cross_validation=="FALSE"){
 } else {
   "Fill in TRUE or FALSE for cross-validation"
 }
-
-
 
 #### Make bar plot
 
@@ -305,7 +348,7 @@ if (cross_validation=="FALSE"){
   Regression_results_valid_PRSice <- Regression_results_PRSice[(Regression_results_PRSice$P_value < 0.05 & Regression_results_PRSice$OR > 1),]
   ##### Check if Regression_results_valid is empty
   if (nrow(Regression_results_valid_PRSice) == 0) {
-    sorted_regression_results_PRSice <- data.frame(Tool = "PRSice",Parameters = colnames(PRS_test_PRSice_pheno[3]), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001)
+    sorted_regression_results_PRSice <- data.frame(Tool = "PRSice",Parameters = colnames(PRS_test_PRSice_pheno[3]), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, R2_cox = 0.001)
     cat("There are no regression results with p < 0.05 and OR > 1... creating dummy row")
   } else { 
     sorted_regression_results_PRSice <- Regression_results_valid_PRSice %>% arrange(desc(R2))
@@ -402,6 +445,24 @@ if(nrow(Regression_results_valid_PRSice)==0){
   ggsave(paste0(out_PRSice, "/ROC_curve.svg"), ROC_PRSice, width=9, height=6)
 }
 
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  Regression_covariates <- data.frame(matrix(ncol=5, nrow=0))
+  for (covs in covariate_list){
+    PRS_test_PRSice_cov <- merge(best_PRS_PRSice, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_glm <- glm(full_form, data = PRS_test_PRSice_cov, family=binomial())
+    null_glm <- glm(null_form, data = PRS_test_PRSice_cov, family=binomial())
+    R2_full <- PseudoR2(full_glm, which="Nagelkerke")
+    R2_null <- PseudoR2(null_glm, which="Nagelkerke")
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("PRSice", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
+}
+
 #### Divide into cases and controls
 
 cases <- best_PRS_PRSice[(best_PRS_PRSice$PHENO==1),]
@@ -410,6 +471,10 @@ controls <- best_PRS_PRSice[(best_PRS_PRSice$PHENO==0),]
 #### Histogram
 
 histogram_case_control(case=cases, control=controls, data=best_PRS_PRSice, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_PRSice, "/Histogram_best_score_PRSice.svg"))
+
+#### Density
+
+density_case_control(case=cases, control=controls, data=best_PRS_PRSice, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_PRSice, "/Density_best_score_PRSice.svg"))
 
 #### Boxplot
 
@@ -526,7 +591,7 @@ for (i in 1:length(data_frames_training_PC)) {
 #### Perform the regression
 
 if (cross_validation=="FALSE"){
-  Regression_results_lasso <- data.frame(matrix(ncol=11, nrow=0))
+  Regression_results_lasso <- data.frame(matrix(ncol=12, nrow=0))
   
   for (j in 1:length(data_frames_test)){
     test <- data_frames_test[[j]]
@@ -539,28 +604,30 @@ if (cross_validation=="FALSE"){
     
     for (i in 1:length(scores)) {
       b <- scores[i]
-      thresh <- paste(b)  
-      tip <- paste("PHENO", "~", thresh,sep="")
+      thresh <- lambda[i]
+      tip <- paste("PHENO", "~", b,sep="")
       alpha <- glm(tip, data = test_pheno, family=binomial())
       R2_full <- PseudoR2(alpha, which="Nagelkerke")
+      R2_Cox <- PseudoR2(alpha, which="CoxSnell")
       OR <- exp(coef(alpha))[2]
       CI <- exp(confint(alpha))[2,]
       p <- coef(summary(alpha))[2,4]
       beta <- coef(summary(alpha))[2,1]
       SE <- coef(summary(alpha))[2,2]
-      Regression_results_lasso <- rbind(Regression_results_lasso, c(shrinkage[j], thresh,beta,SE,p,OR,CI,R2_full, "lassosum", paste0(shrinkage[j], "_", thresh)))
-      colnames(Regression_results_lasso) <- c("Shrink", "Lambda", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "Tool", "Parameters")
+      Regression_results_lasso <- rbind(Regression_results_lasso, c(shrinkage[j], thresh,beta,SE,p,OR,CI,R2_full,R2_Cox, "lassosum", paste0(shrinkage[j], "_", thresh)))
+      colnames(Regression_results_lasso) <- c("Shrink", "Lambda", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","Tool", "Parameters")
     }
   }
   
   Regression_results_lasso$R2 <- as.numeric(Regression_results_lasso$R2)
+  Regression_results_lasso$R2_Cox <- as.numeric(Regression_results_lasso$R2_Cox)
   Regression_results_lasso$P_value <- as.numeric(Regression_results_lasso$P_value)
   Regression_results_lasso$P_value <- ifelse(Regression_results_lasso$P_value==0, 3.4e-314, Regression_results_lasso$P_value)
   
   write.table(Regression_results_lasso, paste0(out_lasso, "/Regression_results_lasso_all"), row.names=F, quote=F, sep="\t")
   
 } else if (cross_validation=="TRUE"){
-  Regression_results_lasso <- data.frame(matrix(ncol=12, nrow=0))
+  Regression_results_lasso <- data.frame(matrix(ncol=13, nrow=0))
   train_control <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
   
   for (j in 1:length(data_frames_test)){
@@ -575,11 +642,12 @@ if (cross_validation=="FALSE"){
     
     for (i in 1:length(scores)) {
       b <- scores[i]
-      thresh <- paste(b)  
+      thresh <- lambda[i]  
       tip <- paste("PHENO", "~", b,sep="")
       tip_2 <- paste("PHENO_2", "~", b, sep="")
       alpha <- glm(tip, data = test_pheno, family=binomial())
       R2_full <- PseudoR2(alpha, which="Nagelkerke")
+      R2_Cox <- PseudoR2(alpha, which="CoxSnell")
       OR <- exp(coef(alpha))[2]
       CI <- exp(confint(alpha))[2,]
       p <- coef(summary(alpha))[2,4]
@@ -587,12 +655,13 @@ if (cross_validation=="FALSE"){
       SE <- coef(summary(alpha))[2,2]
       model <- train(as.formula(tip_2), data=test_pheno, method="glm", trControl=train_control, metric="ROC")
       AUC_CV <- (model$results$ROC)
-      Regression_results_lasso <- rbind(Regression_results_lasso, c(shrinkage[j], thresh,beta,SE,p,OR,CI,R2_full, AUC_CV,"lassosum", paste0(shrinkage[j], "_", thresh)))
-      colnames(Regression_results_lasso) <- c("Shrink", "Lambda", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "AUC_CV","Tool", "Parameters")
+      Regression_results_lasso <- rbind(Regression_results_lasso, c(shrinkage[j], thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,AUC_CV,"lassosum", paste0(shrinkage[j], "_", thresh)))
+      colnames(Regression_results_lasso) <- c("Shrink", "Lambda", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","AUC_CV","Tool", "Parameters")
     }
   }
   
   Regression_results_lasso$R2 <- as.numeric(Regression_results_lasso$R2)
+  Regression_results_lasso$R2_Cox <- as.numeric(Regression_results_lasso$R2_Cox)
   Regression_results_lasso$P_value <- as.numeric(Regression_results_lasso$P_value)
   Regression_results_lasso$P_value <- ifelse(Regression_results_lasso$P_value==0, 3.4e-314, Regression_results_lasso$P_value)
   
@@ -606,21 +675,21 @@ if (cross_validation=="FALSE"){
 #######Select best PRS and plot
 
 #### Get best PRS per shrinkage
-Regression_results_valid_lasso <- Regression_results_lasso[(Regression_results_lasso$P_value < 0.05 & data$OR > 1),]
+Regression_results_valid_lasso <- Regression_results_lasso[(Regression_results_lasso$P_value < 0.05 & Regression_results_lasso$OR > 1),]
 
 if (cross_validation=="FALSE"){
   
-  best_models_lasso <- data.frame(matrix(ncol=11, nrow=0))
+  best_models_lasso <- data.frame(matrix(ncol=12, nrow=0))
   for (i in 1:length(shrinkage)){
     a <- shrinkage[i]
     data <- Regression_results_lasso[(Regression_results_lasso$Shrink==a),]
     write.table(data, paste0(out_lasso, "/Regression_results_", a), row.names = F, quote = F, sep="\t")
     data$R2 <- as.numeric(data$R2)
-    barplot_gradient(data=data, Pt="Lambda", R2="R2", P_value="P_value", all_scores=scores, fill_color="cadetblue3", out=paste0(out_lasso, "/bar_plot_R2_lassosum_", a,".svg"), Tool=paste0("Lassosum: shrinkage ", a))
+    barplot_gradient(data=data, Pt="Lambda", R2="R2", P_value="P_value", all_scores=lambda, fill_color="cadetblue3", out=paste0(out_lasso, "/bar_plot_R2_lassosum_", a,".svg"), Tool=paste0("Lassosum: shrinkage ", a))
     data_valid <- data[(data$P_value < 0.05 & data$OR > 1),]
     ##### Check if Regression_results_valid is empty
     if (nrow(data_valid) == 0) {
-      data_sorted <- data.frame(Shrink = a, Lambda = paste0(colnames(data_frames_test[[i]])[3], "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, Tool = "lassosum", Parameters = paste0(a, "_", colnames(data_frames_test[[i]])[3], "_res_sc"))
+      data_sorted <- data.frame(Shrink = a, Lambda = paste0(colnames(data_frames_test[[i]])[3], "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, R2_Cox = 0.001 ,Tool = "lassosum", Parameters = paste0(a, "_", colnames(data_frames_test[[i]])[3], "_res_sc"))
       cat("There are no regression results with p < 0.05 and OR > 1 for shrinkage ", a, ".... creating dummy row")
     } else { 
       data_sorted <- data_valid %>% arrange(desc(R2))
@@ -630,17 +699,17 @@ if (cross_validation=="FALSE"){
   
 } else if (cross_validation=="TRUE"){
   
-  best_models_lasso <- data.frame(matrix(ncol=11, nrow=0))
+  best_models_lasso <- data.frame(matrix(ncol=12, nrow=0))
   for (i in 1:length(shrinkage)){
     a <- shrinkage[i]
     data <- Regression_results_lasso[(Regression_results_lasso$Shrink==a),]
     write.table(data, paste0(out_lasso, "/Regression_results_", a), row.names = F, quote = F, sep="\t")
     data$R2 <- as.numeric(data$R2)
-    barplot_gradient(data=data, Pt="Lambda", R2="R2", P_value="P_value", all_scores=scores, fill_color="cadetblue3", out=paste0(out_lasso, "/bar_plot_R2_lassosum_", a,".svg"), Tool=paste0("Lassosum: shrinkage ", a))
+    barplot_gradient(data=data, Pt="Lambda", R2="R2", P_value="P_value", all_scores=lambda, fill_color="cadetblue3", out=paste0(out_lasso, "/bar_plot_R2_lassosum_", a,".svg"), Tool=paste0("Lassosum: shrinkage ", a))
     data_valid <- data[(data$P_value < 0.05 & data$OR > 1),]
     ##### Check if Regression_results_valid is empty
     if (nrow(data_valid) == 0) {
-      data_sorted <- data.frame(Shrink = a, Lambda = paste0(colnames(data_frames_test[[i]])[3], "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, AUC_CV = 0.5,Tool = "lassosum", Parameters = paste0(a, "_", colnames(data_frames_test[[i]])[3], "_res_sc"))
+      data_sorted <- data.frame(Shrink = a, Lambda = paste0(colnames(data_frames_test[[i]])[3], "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, R2_Cox = 0.001, AUC_CV = 0.5,Tool = "lassosum", Parameters = paste0(a, "_", colnames(data_frames_test[[i]])[3], "_res_sc"))
       cat("There are no regression results with p < 0.05 and OR > 1 for shrinkage ", a, ".... creating dummy row")
     } else { 
       data_sorted <- data_valid %>% arrange(desc(AUC_CV))
@@ -662,38 +731,53 @@ if (cross_validation=="FALSE"){
   sorted_regression_results_lasso <- best_models_lasso %>% arrange(desc(R2))
   best_s <- sorted_regression_results_lasso[1,1]
   best_lambda <- sorted_regression_results_lasso[1,2]
+  best_lambda_res_sc <- paste0(best_lambda, "_res_sc")
   
   best_PRS_lasso <- read.table(paste0(out_lasso, "/", test_prefix, "_", best_s, "_scaled_scores"), header=T)
   best_PRS_lasso <- merge(best_PRS_lasso, pheno, by=c("IID", "FID"))
-  col_select_lasso <- c("FID","IID", best_lambda, "PHENO")
+  col_select_lasso <- c("FID","IID", best_lambda_res_sc, "PHENO")
   best_PRS_lasso <- select(best_PRS_lasso, all_of(col_select_lasso))
   best_PRS_lasso$Tool <- "lassosum"
   best_PRS_lasso$parameters <- paste0(best_s, "_", best_lambda)
   colnames(best_PRS_lasso) <- c("FID","IID", "score", "PHENO", "Tool", "parameters")
   
-  write.table(best_PRS_lasso, paste0(out_lasso, "/best_PRS_lasso"), quote = F, row.names = F, sep="\t")
+  #### Write to new file
+  
+  col_select_lasso <- c("FID", "IID", "score", "Tool", "parameters")
+  selection_best_PRS_lasso <- select(best_PRS_lasso, all_of(col_select_lasso))
+  
+  write.table(selection_best_PRS_lasso, paste0(out_lasso, "/best_PRS_lasso"), quote = F, row.names = F, sep="\t")
   
   Regression_best_lasso <- sorted_regression_results_lasso[1,]
-  Regression_best_lasso <- Regression_best_lasso[1,c(3:11)]
+  Regression_best_lasso <- Regression_best_lasso[1,c(3:12)]
   Regression_best_per_tool <- rbind(Regression_best_per_tool, Regression_best_lasso)
 } else if (cross_validation=="TRUE"){
   sorted_regression_results_lasso <- best_models_lasso %>% arrange(desc(AUC_CV))
   best_s <- sorted_regression_results_lasso[1,1]
   best_lambda <- sorted_regression_results_lasso[1,2]
+  best_lambda_res_sc <- paste0(best_lambda, "_res_sc")
   
   best_PRS_lasso <- read.table(paste0(out_lasso, "/", test_prefix, "_", best_s, "_scaled_scores"), header=T)
   best_PRS_lasso <- merge(best_PRS_lasso, pheno, by=c("IID", "FID"))
-  col_select_lasso <- c("FID","IID", best_lambda, "PHENO")
+  col_select_lasso <- c("FID","IID", best_lambda_res_sc, "PHENO")
   best_PRS_lasso <- select(best_PRS_lasso, all_of(col_select_lasso))
   best_PRS_lasso$Tool <- "lassosum"
   best_PRS_lasso$parameters <- paste0(best_s, "_", best_lambda)
   colnames(best_PRS_lasso) <- c("FID","IID", "score", "PHENO", "Tool", "parameters")
   
-  write.table(best_PRS_lasso, paste0(out_lasso, "/best_PRS_lasso"), quote = F, row.names = F, sep="\t")
+  #### Write to new file
+  
+  col_select_lasso <- c("FID", "IID", "score", "Tool", "parameters")
+  selection_best_PRS_lasso <- select(best_PRS_lasso, all_of(col_select_lasso))
+  
+  write.table(selection_best_PRS_lasso, paste0(out_lasso, "/best_PRS_lasso"), quote = F, row.names = F, sep="\t")
   
   Regression_best_lasso <- sorted_regression_results_lasso[1,]
-  Regression_best_lasso <- Regression_best_lasso[1,c(3:12)]
+  Regression_best_lasso <- Regression_best_lasso[1,c(3:13)]
   Regression_best_per_tool <- rbind(Regression_best_per_tool, Regression_best_lasso)
+  
+  
+  
 } else {
   "Fill in TRUE or FALSE for cross-validation"
 }
@@ -741,6 +825,23 @@ if(nrow(Regression_results_valid_lasso) == 0){
   ggsave(paste0(out_lasso, "/ROC_curve.svg"), ROC_lasso, width=9, height=6)
 }
 
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  for (covs in covariate_list) {
+    PRS_test_lasso_cov <- merge(best_PRS_lasso, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_glm <- glm(full_form, data = PRS_test_lasso_cov, family=binomial())
+    null_glm <- glm(null_form, data = PRS_test_lasso_cov, family=binomial())
+    R2_full <- PseudoR2(full_glm, which="Nagelkerke")
+    R2_null <- PseudoR2(null_glm, which="Nagelkerke")
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("lassosum", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
+}
+
 #### Divide into cases and controls
 
 best_PRS_lasso$PHENO <- as.factor(best_PRS_lasso$PHENO)
@@ -750,6 +851,11 @@ controls <- best_PRS_lasso[(best_PRS_lasso$PHENO==0),]
 #### Histogram
 
 histogram_case_control(case=cases, control=controls, data=best_PRS_lasso, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_lasso, "/Histogram_best_score_lasso.svg"))
+
+#### Density
+
+density_case_control(case=cases, control=controls, data=best_PRS_lasso, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_lasso, "/Density_best_score_lasso.svg"))
+
 
 #### Boxplot
 
@@ -869,7 +975,7 @@ PRS_test_PRS_CS_pheno$PHENO_2 <- ifelse(PRS_test_PRS_CS_pheno$PHENO==0, "control
 
 #### Perform the regression
 if (cross_validation=="FALSE"){
-  Regression_results_PRS_CS <- data.frame(matrix(ncol=9, nrow=0))
+  Regression_results_PRS_CS <- data.frame(matrix(ncol=10, nrow=0))
   
   for (i in 1:length(phi_values_res_sc)) {
     a <- phi_values_res_sc[i]
@@ -877,22 +983,24 @@ if (cross_validation=="FALSE"){
     tip <- paste("PHENO", "~", a,sep="")
     alpha <- glm(tip, data = PRS_test_PRS_CS_pheno, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
     beta <- coef(summary(alpha))[2,1]
     SE <- coef(summary(alpha))[2,2]
-    Regression_results_PRS_CS <- rbind(Regression_results_PRS_CS, c("PRS-CS",thresh,beta,SE,p,OR,CI,R2_full))
-    colnames(Regression_results_PRS_CS) <- c("Tool","Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2")
+    Regression_results_PRS_CS <- rbind(Regression_results_PRS_CS, c("PRS-CS",thresh,beta,SE,p,OR,CI,R2_full, R2_Cox))
+    colnames(Regression_results_PRS_CS) <- c("Tool","Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox")
   }
   
   Regression_results_PRS_CS$R2 <- as.numeric(Regression_results_PRS_CS$R2)
+  Regression_results_PRS_CS$R2_Cox <- as.numeric(Regression_results_PRS_CS$R2_Cox)
   Regression_results_PRS_CS$P_value <- as.numeric(Regression_results_PRS_CS$P_value)
   Regression_results_PRS_CS$P_value <- ifelse(Regression_results_PRS_CS$P_value==0, 3.4e-314, Regression_results_PRS_CS$P_value)
   
   write.table(Regression_results_PRS_CS, paste0(out_PRScs, "/Regression_results_PRScs"), row.names=F, quote=F, sep="\t")
 } else if (cross_validation=="TRUE"){
-  Regression_results_PRS_CS <- data.frame(matrix(ncol=10, nrow=0))
+  Regression_results_PRS_CS <- data.frame(matrix(ncol=11, nrow=0))
   train_control <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
   for (i in 1:length(phi_values_res_sc)) {
     a <- phi_values_res_sc[i]
@@ -901,6 +1009,7 @@ if (cross_validation=="FALSE"){
     tip_2 <- paste("PHENO_2", "~", a, sep="")
     alpha <- glm(tip, data = PRS_test_PRS_CS_pheno, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
@@ -908,11 +1017,12 @@ if (cross_validation=="FALSE"){
     SE <- coef(summary(alpha))[2,2]
     model <- train(as.formula(tip_2), data=PRS_test_PRS_CS_pheno, method="glm", trControl=train_control, metric="ROC")
     AUC_CV <- (model$results$ROC)
-    Regression_results_PRS_CS <- rbind(Regression_results_PRS_CS, c("PRS-CS",thresh,beta,SE,p,OR,CI,R2_full,AUC_CV))
-    colnames(Regression_results_PRS_CS) <- c("Tool","Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2","AUC_CV")
+    Regression_results_PRS_CS <- rbind(Regression_results_PRS_CS, c("PRS-CS",thresh,beta,SE,p,OR,CI,R2_full,R2_Cox,AUC_CV))
+    colnames(Regression_results_PRS_CS) <- c("Tool","Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","AUC_CV")
   }
   
   Regression_results_PRS_CS$R2 <- as.numeric(Regression_results_PRS_CS$R2)
+  Regression_results_PRS_CS$R2_Cox <- as.numeric(Regression_results_PRS_CS$R2_Cox)
   Regression_results_PRS_CS$P_value <- as.numeric(Regression_results_PRS_CS$P_value)
   Regression_results_PRS_CS$P_value <- ifelse(Regression_results_PRS_CS$P_value==0, 3.4e-314, Regression_results_PRS_CS$P_value)
   
@@ -933,7 +1043,7 @@ barplot_gradient(data=Regression_results_PRS_CS, Pt="Parameters", R2="R2", P_val
 if (cross_validation=="FALSE"){
   Regression_results_valid_PRS_CS <- Regression_results_PRS_CS[(Regression_results_PRS_CS$P_value < 0.05 & Regression_results_PRS_CS$OR > 1),]
   if (nrow(Regression_results_valid_PRS_CS) == 0) {
-    sorted_regression_results_PRS_CS <- data.frame(Tool = "PRS-CS", Parameters = paste0(colnames(PRS_test_PRS_CS[3])), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001)
+    sorted_regression_results_PRS_CS <- data.frame(Tool = "PRS-CS", Parameters = paste0(colnames(PRS_test_PRS_CS[3])), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, R2_Cox = 0.001)
     cat("There are no regression results with p < 0.05 and OR > 1... creating dummy outcome")
   } else { 
     sorted_regression_results_PRS_CS <- Regression_results_valid_PRS_CS %>% arrange(desc(R2))
@@ -958,7 +1068,7 @@ if (cross_validation=="FALSE"){
 } else if (cross_validation=="TRUE"){
   Regression_results_valid_PRS_CS <- Regression_results_PRS_CS[(Regression_results_PRS_CS$P_value < 0.05 & Regression_results_PRS_CS$OR > 1),]
   if (nrow(Regression_results_valid_PRS_CS) == 0) {
-    sorted_regression_results_PRS_CS <- data.frame(Tool = "PRS-CS", Parameters = paste0(colnames(PRS_test_PRS_CS[3])), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, AUC_CV = 0.5)
+    sorted_regression_results_PRS_CS <- data.frame(Tool = "PRS-CS", Parameters = paste0(colnames(PRS_test_PRS_CS[3])), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, R2_Cox = 0.001,AUC_CV = 0.5)
     cat("There are no regression results with p < 0.05 and OR > 1... creating dummy outcome\n")
   } else { 
     sorted_regression_results_PRS_CS <- Regression_results_valid_PRS_CS %>% arrange(desc(AUC_CV))
@@ -1027,6 +1137,23 @@ if(nrow(Regression_results_valid_PRS_CS)==0){
   ggsave(paste0(out_PRScs, "/ROC_curve.svg"), ROC_PRS_CS, width=9, height=6)
 }
 
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  for (covs in covariate_list) {
+    PRS_test_PRS_CS_cov <- merge(best_PRS_PRS_CS, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_glm <- glm(full_form, data = PRS_test_PRS_CS_cov, family=binomial())
+    null_glm <- glm(null_form, data = PRS_test_PRS_CS_cov, family=binomial())
+    R2_full <- PseudoR2(full_glm, which="Nagelkerke")
+    R2_null <- PseudoR2(null_glm, which="Nagelkerke")
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("PRS-CS", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
+}
+
 #### Divide into cases and controls
 
 best_PRS_PRS_CS$PHENO <- as.factor(best_PRS_PRS_CS$PHENO)
@@ -1036,6 +1163,10 @@ controls <- best_PRS_PRS_CS[(best_PRS_PRS_CS$PHENO==0),]
 #### Histogram
 
 histogram_case_control(case=cases, control=controls, data=best_PRS_PRS_CS, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_PRScs, "/Histogram_best_score_PRScs.svg"))
+
+#### Density
+
+density_case_control(case=cases, control=controls, data=best_PRS_PRS_CS, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_PRScs, "/Density_best_score_PRScs.svg"))
 
 #### Boxplot
 
@@ -1242,7 +1373,6 @@ PRS_inf_training <- PRS_inf_training_PCs[, PRS_inf_training_scores]
 write.table(PRS_inf_test, paste0(out_LDpred2, "/", test_prefix_rsID, "_scaled_scores_inf"), row.names = F, quote = F, sep="\t")
 write.table(PRS_inf_training, paste0(out_LDpred2, "/", training_prefix_rsID, "_scaled_scores_inf"), row.names = F, quote = F, sep="\t")
 
-
 ##### Grid
 PRS_grid_test_scores <- colnames(PRS_grid_test_PCs)[!(colnames(PRS_grid_test_PCs) %in% colnames(PC_only))]
 PRS_grid_test <- PRS_grid_test_PCs[, PRS_grid_test_scores]
@@ -1258,7 +1388,6 @@ PRS_auto_grid_training_scores <- colnames(PRS_auto_grid_training_PCs)[!(colnames
 PRS_auto_grid_training <- PRS_auto_grid_training_PCs[, PRS_auto_grid_training_scores]
 write.table(PRS_auto_grid_test, paste0(out_LDpred2, "/", test_prefix_rsID, "_scaled_scores_auto_grid"), row.names = F, quote = F, sep="\t")
 write.table(PRS_auto_grid_training, paste0(out_LDpred2, "/", training_prefix_rsID, "_scaled_scores_auto_grid"), row.names = F, quote = F, sep="\t")
-
 
 ##### Auto
 PRS_auto_test_scores <- colnames(PRS_auto_test_PCs)[!(colnames(PRS_auto_test_PCs) %in% colnames(PC_only))]
@@ -1315,36 +1444,39 @@ PRS_auto_for_regression$PHENO_2 <- ifelse(PRS_auto_for_regression$PHENO==0, "con
 ##### Inf
 
 if (cross_validation=="FALSE"){
-  Regression_results_inf <- data.frame(matrix(ncol=10, nrow=0))
+  Regression_results_inf <- data.frame(matrix(ncol=11, nrow=0))
   for (i in 1:length(scores_regr_inf)) {
     b <- scores_regr_inf[i]
-    thresh <- paste(b)  
+    thresh <- "pred_inf"
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- glm(tip, data = PRS_inf_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
     beta <- coef(summary(alpha))[2,1]
     SE <- coef(summary(alpha))[2,2]
-    Regression_results_inf <- rbind(Regression_results_inf, c("inf", thresh,beta,SE,p,OR,CI,R2_full, "LDpred2"))
-    colnames(Regression_results_inf) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "Tool")
+    Regression_results_inf <- rbind(Regression_results_inf, c("inf", thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,"LDpred2"))
+    colnames(Regression_results_inf) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","Tool")
   }
   Regression_results_inf$R2 <- as.numeric(Regression_results_inf$R2)
+  Regression_results_inf$R2_Cox <- as.numeric(Regression_results_inf$R2_Cox)
   Regression_results_inf$P_value <- as.numeric(Regression_results_inf$P_value)
   Regression_results_inf$P_value <- ifelse(Regression_results_inf$P_value==0, 3.4e-314, Regression_results_inf$P_value)
   
   write.table(Regression_results_inf, paste0(out_LDpred2, "/Regression_results_LDpred2_inf"), row.names=F, quote=F, sep="\t")
 } else if (cross_validation=="TRUE"){
-  Regression_results_inf <- data.frame(matrix(ncol=11, nrow=0))
+  Regression_results_inf <- data.frame(matrix(ncol=12, nrow=0))
   train_control <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
   for (i in 1:length(scores_regr_inf)) {
     b <- scores_regr_inf[i]
-    thresh <- paste(b)  
+    thresh <- "pred_inf"
     tip <- paste("PHENO", "~", b,sep="")
     tip_2 <- paste("PHENO_2", "~", b, sep="")
     alpha <- glm(tip, data = PRS_inf_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
@@ -1352,10 +1484,11 @@ if (cross_validation=="FALSE"){
     SE <- coef(summary(alpha))[2,2]
     model <- train(as.formula(tip_2), data=PRS_inf_for_regression, method="glm", trControl=train_control, metric="ROC")
     AUC_CV <- (model$results$ROC)
-    Regression_results_inf <- rbind(Regression_results_inf, c("inf", thresh,beta,SE,p,OR,CI,R2_full, AUC_CV, "LDpred2"))
-    colnames(Regression_results_inf) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "AUC_CV","Tool")
+    Regression_results_inf <- rbind(Regression_results_inf, c("inf", thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,AUC_CV, "LDpred2"))
+    colnames(Regression_results_inf) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","AUC_CV","Tool")
   }
   Regression_results_inf$R2 <- as.numeric(Regression_results_inf$R2)
+  Regression_results_inf$R2_Cox <- as.numeric(Regression_results_inf$R2_Cox)
   Regression_results_inf$P_value <- as.numeric(Regression_results_inf$P_value)
   Regression_results_inf$P_value <- ifelse(Regression_results_inf$P_value==0, 3.4e-314, Regression_results_inf$P_value)
   
@@ -1367,37 +1500,40 @@ if (cross_validation=="FALSE"){
 ##### Grid
 
 if (cross_validation=="FALSE"){
-  Regression_results_grid <- data.frame(matrix(ncol=10, nrow=0))
+  Regression_results_grid <- data.frame(matrix(ncol=11, nrow=0))
   for (i in 1:length(scores_regr_grid)) {
     b <- scores_regr_grid[i]
-    thresh <- paste(b)  
+    thresh <- scores_grid_2[i]  
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- glm(tip, data = PRS_grid_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
     beta <- coef(summary(alpha))[2,1]
     SE <- coef(summary(alpha))[2,2]
-    Regression_results_grid <- rbind(Regression_results_grid, c("grid", thresh,beta,SE,p,OR,CI,R2_full, "LDpred2"))
-    colnames(Regression_results_grid) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "Tool")
+    Regression_results_grid <- rbind(Regression_results_grid, c("grid", thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,"LDpred2"))
+    colnames(Regression_results_grid) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","Tool")
   }
   
   Regression_results_grid$R2 <- as.numeric(Regression_results_grid$R2)
+  Regression_results_grid$R2_Cox <- as.numeric(Regression_results_grid$R2_Cox)
   Regression_results_grid$P_value <- as.numeric(Regression_results_grid$P_value)
   Regression_results_grid$P_value <- ifelse(Regression_results_grid$P_value==0, 3.4e-314, Regression_results_grid$P_value)
   
   write.table(Regression_results_grid, paste0(out_LDpred2, "/Regression_results_LDpred2_grid"), row.names=F, quote=F, sep="\t")
 } else if (cross_validation=="TRUE"){
-  Regression_results_grid <- data.frame(matrix(ncol=11, nrow=0))
+  Regression_results_grid <- data.frame(matrix(ncol=12, nrow=0))
   train_control <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
   for (i in 1:length(scores_regr_grid)) {
     b <- scores_regr_grid[i]
-    thresh <- paste(b)  
+    thresh <- scores_grid_2[i]
     tip <- paste("PHENO", "~", b,sep="")
     tip_2 <- paste("PHENO_2", "~", b, sep="")
     alpha <- glm(tip, data = PRS_grid_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
@@ -1405,11 +1541,12 @@ if (cross_validation=="FALSE"){
     SE <- coef(summary(alpha))[2,2]
     model <- train(as.formula(tip_2), data=PRS_grid_for_regression, method="glm", trControl=train_control, metric="ROC")
     AUC_CV <- (model$results$ROC)
-    Regression_results_grid <- rbind(Regression_results_grid, c("grid", thresh,beta,SE,p,OR,CI,R2_full,AUC_CV, "LDpred2"))
-    colnames(Regression_results_grid) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "AUC_CV","Tool")
+    Regression_results_grid <- rbind(Regression_results_grid, c("grid", thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,AUC_CV, "LDpred2"))
+    colnames(Regression_results_grid) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","AUC_CV","Tool")
   }
   
   Regression_results_grid$R2 <- as.numeric(Regression_results_grid$R2)
+  Regression_results_grid$R2_Cox <- as.numeric(Regression_results_grid$R2_Cox)
   Regression_results_grid$P_value <- as.numeric(Regression_results_grid$P_value)
   Regression_results_grid$P_value <- ifelse(Regression_results_grid$P_value==0, 3.4e-314, Regression_results_grid$P_value)
   
@@ -1421,37 +1558,40 @@ if (cross_validation=="FALSE"){
 ##### Auto grid
 
 if (cross_validation=="FALSE"){
-  Regression_results_auto_grid <- data.frame(matrix(ncol=10, nrow=0))
+  Regression_results_auto_grid <- data.frame(matrix(ncol=11, nrow=0))
   for (i in 1:length(scores_regr_auto_grid)) {
     b <- scores_regr_auto_grid[i]
-    thresh <- paste(b)  
+    thresh <- scores_auto_grid_2[i] 
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- glm(tip, data = PRS_auto_grid_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
     beta <- coef(summary(alpha))[2,1]
     SE <- coef(summary(alpha))[2,2]
-    Regression_results_auto_grid <- rbind(Regression_results_auto_grid, c("auto_grid", thresh,beta,SE,p,OR,CI,R2_full, "LDpred2"))
-    colnames(Regression_results_auto_grid) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "Tool")
+    Regression_results_auto_grid <- rbind(Regression_results_auto_grid, c("auto_grid", thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,"LDpred2"))
+    colnames(Regression_results_auto_grid) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox", "Tool")
   }
   
   Regression_results_auto_grid$R2 <- as.numeric(Regression_results_auto_grid$R2)
+  Regression_results_auto_grid$R2_Cox <- as.numeric(Regression_results_auto_grid$R2_Cox)
   Regression_results_auto_grid$P_value <- as.numeric(Regression_results_auto_grid$P_value)
   Regression_results_auto_grid$P_value <- ifelse(Regression_results_auto_grid$P_value==0, 3.4e-314, Regression_results_auto_grid$P_value)
   
   write.table(Regression_results_auto_grid, paste0(out_LDpred2, "/Regression_results_LDpred2_auto_grid"), row.names=F, quote=F, sep="\t")
 } else if (cross_validation=="TRUE"){
-  Regression_results_auto_grid <- data.frame(matrix(ncol=11, nrow=0))
+  Regression_results_auto_grid <- data.frame(matrix(ncol=12, nrow=0))
   train_control <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
   for (i in 1:length(scores_regr_auto_grid)) {
     b <- scores_regr_auto_grid[i]
-    thresh <- paste(b)  
+    thresh <- scores_auto_grid_2[i]
     tip <- paste("PHENO", "~", b,sep="")
     tip_2 <- paste("PHENO_2", "~", b, sep="")
     alpha <- glm(tip, data = PRS_auto_grid_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
@@ -1459,11 +1599,12 @@ if (cross_validation=="FALSE"){
     SE <- coef(summary(alpha))[2,2]
     model <- train(as.formula(tip_2), data=PRS_auto_grid_for_regression, method="glm", trControl=train_control, metric="ROC")
     AUC_CV <- (model$results$ROC)
-    Regression_results_auto_grid <- rbind(Regression_results_auto_grid, c("auto_grid", thresh,beta,SE,p,OR,CI,R2_full, AUC_CV,"LDpred2"))
-    colnames(Regression_results_auto_grid) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "AUC_CV","Tool")
+    Regression_results_auto_grid <- rbind(Regression_results_auto_grid, c("auto_grid", thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,AUC_CV,"LDpred2"))
+    colnames(Regression_results_auto_grid) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","AUC_CV","Tool")
   }
   
   Regression_results_auto_grid$R2 <- as.numeric(Regression_results_auto_grid$R2)
+  Regression_results_auto_grid$R2_Cox <- as.numeric(Regression_results_auto_grid$R2_Cox)
   Regression_results_auto_grid$P_value <- as.numeric(Regression_results_auto_grid$P_value)
   Regression_results_auto_grid$P_value <- ifelse(Regression_results_auto_grid$P_value==0, 3.4e-314, Regression_results_auto_grid$P_value)
   
@@ -1478,34 +1619,37 @@ if (cross_validation=="FALSE"){
   Regression_results_auto <- data.frame(matrix(ncol=10, nrow=0))
   for (i in 1:length(scores_regr_auto)) {
     b <- scores_regr_auto[i]
-    thresh <- paste(b)  
+    thresh <- "pred_auto"
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- glm(tip, data = PRS_auto_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
     beta <- coef(summary(alpha))[2,1]
     SE <- coef(summary(alpha))[2,2]
-    Regression_results_auto <- rbind(Regression_results_auto, c("auto", thresh,beta,SE,p,OR,CI,R2_full, "LDpred2"))
-    colnames(Regression_results_auto) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "Tool")
+    Regression_results_auto <- rbind(Regression_results_auto, c("auto", thresh,beta,SE,p,OR,CI,R2_full,R2_Cox ,"LDpred2"))
+    colnames(Regression_results_auto) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","Tool")
   }
   
   Regression_results_auto$R2 <- as.numeric(Regression_results_auto$R2)
+  Regression_results_auto$R2_Cox <- as.numeric(Regression_results_auto$R2_Cox)
   Regression_results_auto$P_value <- as.numeric(Regression_results_auto$P_value)
   Regression_results_auto$P_value <- ifelse(Regression_results_auto$P_value==0, 3.4e-314, Regression_results_auto$P_value)
   
   write.table(Regression_results_auto, paste0(out_LDpred2, "/Regression_results_LDpred2_auto"), row.names=F, quote=F, sep="\t")
 } else if (cross_validation=="TRUE"){
-  Regression_results_auto <- data.frame(matrix(ncol=10, nrow=0))
+  Regression_results_auto <- data.frame(matrix(ncol=12, nrow=0))
   train_control <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
   for (i in 1:length(scores_regr_auto)) {
     b <- scores_regr_auto[i]
-    thresh <- paste(b)  
+    thresh <- "pred_auto"
     tip <- paste("PHENO", "~", b,sep="")
     tip_2 <- paste("PHENO_2", "~", b, sep="")
     alpha <- glm(tip, data = PRS_auto_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
@@ -1513,11 +1657,12 @@ if (cross_validation=="FALSE"){
     SE <- coef(summary(alpha))[2,2]
     model <- train(as.formula(tip_2), data=PRS_auto_for_regression, method="glm", trControl=train_control, metric="ROC")
     AUC_CV <- (model$results$ROC)
-    Regression_results_auto <- rbind(Regression_results_auto, c("auto", thresh,beta,SE,p,OR,CI,R2_full, AUC_CV,"LDpred2"))
-    colnames(Regression_results_auto) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "AUC_CV","Tool")
+    Regression_results_auto <- rbind(Regression_results_auto, c("auto", thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,AUC_CV,"LDpred2"))
+    colnames(Regression_results_auto) <- c("Model", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2","R2_Cox", "AUC_CV","Tool")
   }
   
   Regression_results_auto$R2 <- as.numeric(Regression_results_auto$R2)
+  Regression_results_auto$R2_Cox <- as.numeric(Regression_results_auto$R2_Cox)
   Regression_results_auto$P_value <- as.numeric(Regression_results_auto$P_value)
   Regression_results_auto$P_value <- ifelse(Regression_results_auto$P_value==0, 3.4e-314, Regression_results_auto$P_value)
   
@@ -1531,20 +1676,20 @@ if (cross_validation=="FALSE"){
 ##### Inf
 bar_plot <- ggplot(data=Regression_results_inf, aes(x=Parameters, y=R2)) +
   geom_bar(stat = "identity", position = "dodge", fill="cadetblue3") +
-  scale_x_discrete(limits=scores_regr_inf, guide = guide_axis(angle = 90)) +
+  scale_x_discrete(limits="pred_inf", guide = guide_axis(angle = 90)) +
   xlab("") + ylab("Nagelkerke R2") +theme_minimal() + ggtitle("LDpred2 - inf model")
 ggsave(paste0(out_LDpred2, "/bar_plot_R2_LDpred2_inf.svg"), bar_plot, width=7, height=7)
 
 ##### Grid
-barplot_gradient(data=Regression_results_grid, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_regr_grid, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_grid.svg"), Tool="LDpred2 - grid model")
+barplot_gradient(data=Regression_results_grid, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_grid_2, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_grid.svg"), Tool="LDpred2 - grid model")
 
 ##### Auto grid
-barplot_gradient(data=Regression_results_auto_grid, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_regr_auto_grid, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_auto_grid.svg"), Tool="LDpred2 - auto grid model")
+barplot_gradient(data=Regression_results_auto_grid, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_auto_grid_2, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_LDpred2_auto_grid.svg"), Tool="LDpred2 - auto grid model")
 
 ##### Auto
 bar_plot <- ggplot(data=Regression_results_auto, aes(x=Parameters, y=R2)) +
   geom_bar(stat = "identity", position = "dodge", fill="cadetblue3") +
-  scale_x_discrete(limits=scores_regr_auto, guide = guide_axis(angle = 90)) +
+  scale_x_discrete(limits="pred_auto", guide = guide_axis(angle = 90)) +
   xlab("") + ylab("Nagelkerke R2") +theme_minimal() + ggtitle("LDpred2 - auto model")
 ggsave(paste0(out_LDpred2, "/bar_plot_R2_LDpred2_auto.svg"), bar_plot, width=7, height=7)
 
@@ -1557,7 +1702,7 @@ if (cross_validation=="FALSE"){
   Regression_results_valid_LDpred2 <- Regression_results_LDpred2[(Regression_results_LDpred2$P_value < 0.05 & Regression_results_LDpred2$OR > 1),]
   
   if (nrow(Regression_results_valid_LDpred2) == 0) {
-    sorted_regression_results_LDpred2 <- data.frame(Model = "grid", Parameters = paste0(colnames(PRS_grid_training[3]), "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, Tool="LDpred2")
+    sorted_regression_results_LDpred2 <- data.frame(Model = "grid", Parameters = paste0(colnames(PRS_grid_training[3]), "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, R2_Cox = 0.001,Tool="LDpred2")
     cat("There are no regression results with p < 0.05 and OR > 1... creating dummy outcome")
   } else { 
     sorted_regression_results_LDpred2 <- Regression_results_valid_LDpred2 %>% arrange(desc(R2))
@@ -1565,6 +1710,7 @@ if (cross_validation=="FALSE"){
   
   best_model <- sorted_regression_results_LDpred2[1,1]
   best_parameters <- sorted_regression_results_LDpred2[1,2]
+  best_parameters_res_sc <- paste0(best_parameters, "_res_sc")
   
   best_model_LDpred2 <- switch(
     best_model,
@@ -1575,47 +1721,7 @@ if (cross_validation=="FALSE"){
     stop("Invalid best_model value")
   )
   
-  col_select_LDpred2 <- c("FID","IID", best_parameters, "PHENO")
-  best_PRS_LDpred2 <- select(best_model_LDpred2, all_of(col_select_LDpred2))
-  best_PRS_LDpred2$Tool <- paste0("LDpred2_", best_model)
-  best_PRS_LDpred2$parameters <- best_parameters
-  colnames(best_PRS_LDpred2) <- c("FID","IID", "score", "PHENO", "Tool", "parameters")
-  
-  #### Write to new file
-  
-  col_select_LDpred2 <- c("FID","IID", "score", "Tool", "parameters")
-  selection_best_PRS_LDpred2 <- select(best_PRS_LDpred2, all_of(col_select_LDpred2))
-  write.table(selection_best_PRS_LDpred2, paste0(out_LDpred2, "/best_PRS_LDpred2"), row.names=F, quote=F, sep="\t")
-  
-  Regression_best_LDpred2 <- sorted_regression_results_LDpred2[1,]
-  Regression_best_LDpred2$Parameters <- paste0(Regression_best_LDpred2$Model, "_", Regression_best_LDpred2$Parameters)
-  Regression_best_LDpred2 <- Regression_best_LDpred2[,c(2:10)]
-  Regression_best_per_tool <- rbind(Regression_best_per_tool, Regression_best_LDpred2)
-  
-} else if (cross_validation=="TRUE"){
-  Regression_results_LDpred2 <- rbind(Regression_results_inf, rbind(Regression_results_grid, rbind(Regression_results_auto_grid, Regression_results_auto)))
-  Regression_results_valid_LDpred2 <- Regression_results_LDpred2[(Regression_results_LDpred2$P_value < 0.05 & Regression_results_LDpred2$OR > 1),]
-  
-  if (nrow(Regression_results_valid_LDpred2) == 0) {
-    sorted_regression_results_LDpred2 <- data.frame(Model = "grid", Parameters = paste0(colnames(PRS_grid_training[3]), "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, AUC_CV=0.5,Tool="LDpred2")
-    cat("There are no regression results with p < 0.05 and OR > 1... creating dummy outcome")
-  } else { 
-    sorted_regression_results_LDpred2 <- Regression_results_valid_LDpred2 %>% arrange(desc(AUC_CV))
-  }
-  
-  best_model <- sorted_regression_results_LDpred2[1,1]
-  best_parameters <- sorted_regression_results_LDpred2[1,2]
-  
-  best_model_LDpred2 <- switch(
-    best_model,
-    "inf" = PRS_inf_for_regression,
-    "grid" = PRS_grid_for_regression,
-    "auto_grid" = PRS_auto_grid_for_regression,
-    "auto" = PRS_auto_for_regression,
-    stop("Invalid best_model value")
-  )
-  
-  col_select_LDpred2 <- c("FID","IID", best_parameters, "PHENO")
+  col_select_LDpred2 <- c("FID","IID", best_parameters_res_sc, "PHENO")
   best_PRS_LDpred2 <- select(best_model_LDpred2, all_of(col_select_LDpred2))
   best_PRS_LDpred2$Tool <- paste0("LDpred2_", best_model)
   best_PRS_LDpred2$parameters <- best_parameters
@@ -1630,6 +1736,47 @@ if (cross_validation=="FALSE"){
   Regression_best_LDpred2 <- sorted_regression_results_LDpred2[1,]
   Regression_best_LDpred2$Parameters <- paste0(Regression_best_LDpred2$Model, "_", Regression_best_LDpred2$Parameters)
   Regression_best_LDpred2 <- Regression_best_LDpred2[,c(2:11)]
+  Regression_best_per_tool <- rbind(Regression_best_per_tool, Regression_best_LDpred2)
+  
+} else if (cross_validation=="TRUE"){
+  Regression_results_LDpred2 <- rbind(Regression_results_inf, rbind(Regression_results_grid, rbind(Regression_results_auto_grid, Regression_results_auto)))
+  Regression_results_valid_LDpred2 <- Regression_results_LDpred2[(Regression_results_LDpred2$P_value < 0.05 & Regression_results_LDpred2$OR > 1),]
+  
+  if (nrow(Regression_results_valid_LDpred2) == 0) {
+    sorted_regression_results_LDpred2 <- data.frame(Model = "grid", Parameters = paste0(colnames(PRS_grid_training[3]), "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, R2_Cox = 0.001,AUC_CV=0.5,Tool="LDpred2")
+    cat("There are no regression results with p < 0.05 and OR > 1... creating dummy outcome")
+  } else { 
+    sorted_regression_results_LDpred2 <- Regression_results_valid_LDpred2 %>% arrange(desc(AUC_CV))
+  }
+  
+  best_model <- sorted_regression_results_LDpred2[1,1]
+  best_parameters <- sorted_regression_results_LDpred2[1,2]
+  best_parameters_res_sc <- paste0(best_parameters, "_res_sc")
+  
+  best_model_LDpred2 <- switch(
+    best_model,
+    "inf" = PRS_inf_for_regression,
+    "grid" = PRS_grid_for_regression,
+    "auto_grid" = PRS_auto_grid_for_regression,
+    "auto" = PRS_auto_for_regression,
+    stop("Invalid best_model value")
+  )
+  
+  col_select_LDpred2 <- c("FID","IID", best_parameters_res_sc, "PHENO")
+  best_PRS_LDpred2 <- select(best_model_LDpred2, all_of(col_select_LDpred2))
+  best_PRS_LDpred2$Tool <- paste0("LDpred2_", best_model)
+  best_PRS_LDpred2$parameters <- best_parameters
+  colnames(best_PRS_LDpred2) <- c("FID","IID", "score", "PHENO", "Tool", "parameters")
+  
+  #### Write to new file
+  
+  col_select_LDpred2 <- c("FID","IID", "score", "Tool", "parameters")
+  selection_best_PRS_LDpred2 <- select(best_PRS_LDpred2, all_of(col_select_LDpred2))
+  write.table(selection_best_PRS_LDpred2, paste0(out_LDpred2, "/best_PRS_LDpred2"), row.names=F, quote=F, sep="\t")
+  
+  Regression_best_LDpred2 <- sorted_regression_results_LDpred2[1,]
+  Regression_best_LDpred2$Parameters <- paste0(Regression_best_LDpred2$Model, "_", Regression_best_LDpred2$Parameters)
+  Regression_best_LDpred2 <- Regression_best_LDpred2[,c(2:12)]
   Regression_best_per_tool <- rbind(Regression_best_per_tool, Regression_best_LDpred2)
   
 } else {
@@ -1678,6 +1825,23 @@ if(nrow(Regression_results_valid_LDpred2)==0){
   ggsave(paste0(out_LDpred2, "/ROC_curve.svg"), ROC_LDpred2, width=9, height=6)
 }
 
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  for (covs in covariate_list) {
+    PRS_test_LDpred2_cov <- merge(best_PRS_LDpred2, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_glm <- glm(full_form, data = PRS_test_LDpred2_cov, family=binomial())
+    null_glm <- glm(null_form, data = PRS_test_LDpred2_cov, family=binomial())
+    R2_full <- PseudoR2(full_glm, which="Nagelkerke")
+    R2_null <- PseudoR2(null_glm, which="Nagelkerke")
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("LDpred2", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
+}
+
 #### Divide into cases and controls
 
 cases <- best_PRS_LDpred2[(best_PRS_LDpred2$PHENO==1),]
@@ -1686,6 +1850,10 @@ controls <- best_PRS_LDpred2[(best_PRS_LDpred2$PHENO==0),]
 #### Histogram
 
 histogram_case_control(case=cases, control=controls, data=best_PRS_LDpred2, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_LDpred2, "/Histogram_best_score_LDpred2.svg"))
+
+#### Density
+
+density_case_control(case=cases, control=controls, data=best_PRS_LDpred2, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_LDpred2, "/Density_best_score_LDpred2.svg"))
 
 #### Boxplot
 
@@ -1783,37 +1951,40 @@ PRS_lasso2_for_regression$PHENO_2 <- ifelse(PRS_lasso2_for_regression$PHENO==0, 
 #### Perform logistic regression
 
 if (cross_validation=="FALSE"){
-  Regression_results_lasso2 <- data.frame(matrix(ncol=9, nrow=0))
+  Regression_results_lasso2 <- data.frame(matrix(ncol=10, nrow=0))
   for (i in 1:length(scores_regr_lasso2)) {
     b <- scores_regr_lasso2[i]
-    thresh <- paste(b)  
+    thresh <- scores_lasso2_2[i]
     tip <- paste("PHENO", "~", b,sep="")
     alpha <- glm(tip, data = PRS_lasso2_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
     beta <- coef(summary(alpha))[2,1]
     SE <- coef(summary(alpha))[2,2]
-    Regression_results_lasso2 <- rbind(Regression_results_lasso2, c("lassosum2", thresh,beta,SE,p,OR,CI,R2_full))
-    colnames(Regression_results_lasso2) <- c("Tool", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2")
+    Regression_results_lasso2 <- rbind(Regression_results_lasso2, c("lassosum2", thresh,beta,SE,p,OR,CI,R2_full, R2_Cox))
+    colnames(Regression_results_lasso2) <- c("Tool", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox")
   }
   
   Regression_results_lasso2$R2 <- as.numeric(Regression_results_lasso2$R2)
+  Regression_results_lasso2$R2_Cox <- as.numeric(Regression_results_lasso2$R2_Cox)
   Regression_results_lasso2$P_value <- as.numeric(Regression_results_lasso2$P_value)
   Regression_results_lasso2$P_value <- ifelse(Regression_results_lasso2$P_value==0, 3.4e-314, Regression_results_lasso2$P_value)
   
   write.table(Regression_results_lasso2, paste0(out_lasso2, "/Regression_results_lassosum2"), row.names=F, quote=F, sep="\t")
 } else if (cross_validation=="TRUE"){
-  Regression_results_lasso2 <- data.frame(matrix(ncol=10, nrow=0))
+  Regression_results_lasso2 <- data.frame(matrix(ncol=11, nrow=0))
   train_control <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
   for (i in 1:length(scores_regr_lasso2)) {
     b <- scores_regr_lasso2[i]
-    thresh <- paste(b)  
+    thresh <- scores_lasso2_2[i] 
     tip <- paste("PHENO", "~", b,sep="")
     tip_2 <- paste("PHENO_2", "~", b, sep="")
     alpha <- glm(tip, data = PRS_lasso2_for_regression, family=binomial())
     R2_full <- PseudoR2(alpha, which="Nagelkerke")
+    R2_Cox <- PseudoR2(alpha, which="CoxSnell")
     OR <- exp(coef(alpha))[2]
     CI <- exp(confint(alpha))[2,]
     p <- coef(summary(alpha))[2,4]
@@ -1821,11 +1992,12 @@ if (cross_validation=="FALSE"){
     SE <- coef(summary(alpha))[2,2]
     model <- train(as.formula(tip_2), data=PRS_lasso2_for_regression, method="glm", trControl=train_control, metric="ROC")
     AUC_CV <- (model$results$ROC)
-    Regression_results_lasso2 <- rbind(Regression_results_lasso2, c("lassosum2", thresh,beta,SE,p,OR,CI,R2_full, AUC_CV))
-    colnames(Regression_results_lasso2) <- c("Tool", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "AUC_CV")
+    Regression_results_lasso2 <- rbind(Regression_results_lasso2, c("lassosum2", thresh,beta,SE,p,OR,CI,R2_full, R2_Cox,AUC_CV))
+    colnames(Regression_results_lasso2) <- c("Tool", "Parameters", "Beta", "SE", "P_value", "OR", "CI_low", "CI_up", "R2", "R2_Cox","AUC_CV")
   }
   
   Regression_results_lasso2$R2 <- as.numeric(Regression_results_lasso2$R2)
+  Regression_results_lasso2$R2_Cox <- as.numeric(Regression_results_lasso2$R2_Cox)
   Regression_results_lasso2$P_value <- as.numeric(Regression_results_lasso2$P_value)
   Regression_results_lasso2$P_value <- ifelse(Regression_results_lasso2$P_value==0, 3.4e-314, Regression_results_lasso2$P_value)
   
@@ -1836,7 +2008,7 @@ if (cross_validation=="FALSE"){
 
 #### Make bar plot
 
-barplot_gradient(data=Regression_results_lasso2, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_regr_lasso2, fill_color="cadetblue3", out=paste0(out_LDpred2, "/bar_plot_R2_lassosum2.svg"), Tool="Lassosum2")
+barplot_gradient(data=Regression_results_lasso2, Pt="Parameters", R2="R2", P_value="P_value", all_scores=scores_lasso2_2, fill_color="cadetblue3", out=paste0(out_lasso2, "/bar_plot_R2_lassosum2.svg"), Tool="Lassosum2")
 
 ##############################
 #######Select best PRS and plot
@@ -1848,7 +2020,7 @@ Regression_results_valid_lasso2 <- Regression_results_lasso2[(Regression_results
 if (cross_validation=="FALSE"){
   
   if (nrow(Regression_results_valid_lasso2) == 0) {
-    sorted_regression_results_lasso2 <- data.frame(Tool = "lassosum2", Parameters=paste0(colnames(PRS_lasso2_test)[3], "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001)
+    sorted_regression_results_lasso2 <- data.frame(Tool = "lassosum2", Parameters=paste0(colnames(PRS_lasso2_test)[3], "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, R2_Cox = 0.001)
     cat("There are no regression results with p < 0.05 and OR > 1... creating dummy outcome")
   } else { 
     sorted_regression_results_lasso2 <- Regression_results_valid_lasso2 %>% arrange(desc(R2))
@@ -1856,7 +2028,8 @@ if (cross_validation=="FALSE"){
   
   best_model <- sorted_regression_results_lasso2[1,1]
   best_parameters <- sorted_regression_results_lasso2[1,2]
-  col_select_lasso2 <- c("FID","IID", best_parameters, "PHENO")
+  best_parameters_res_sc <- paste0(best_parameters, "_res_sc")
+  col_select_lasso2 <- c("FID","IID", best_parameters_res_sc, "PHENO")
   best_PRS_lasso2 <- select(PRS_lasso2_for_regression, all_of(col_select_lasso2))
   best_PRS_lasso2$Tool <- best_model
   best_PRS_lasso2$parameters <- best_parameters
@@ -1875,7 +2048,7 @@ if (cross_validation=="FALSE"){
 } else if (cross_validation=="TRUE"){
   
   if (nrow(Regression_results_valid_lasso2) == 0) {
-    sorted_regression_results_lasso2 <- data.frame(Tool = "lassosum2", Parameters=paste0(colnames(PRS_lasso2_test)[3], "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, AUC_CV=0.5)
+    sorted_regression_results_lasso2 <- data.frame(Tool = "lassosum2", Parameters=paste0(colnames(PRS_lasso2_test)[3], "_res_sc"), Beta = 0, SE = 0, P_value = 1, OR = 1, CI_low = 1, CI_up = 1, R2 = 0.001, R2_Cox = 0.001,AUC_CV=0.5)
     cat("There are no regression results with p < 0.05 and OR > 1... creating dummy outcome")
   } else { 
     sorted_regression_results_lasso2 <- Regression_results_valid_lasso2 %>% arrange(desc(AUC_CV))
@@ -1883,7 +2056,8 @@ if (cross_validation=="FALSE"){
   
   best_model <- sorted_regression_results_lasso2[1,1]
   best_parameters <- sorted_regression_results_lasso2[1,2]
-  col_select_lasso2 <- c("FID","IID", best_parameters, "PHENO")
+  best_parameters_res_sc <- paste0(best_parameters, "_res_sc")
+  col_select_lasso2 <- c("FID","IID", best_parameters_res_sc, "PHENO")
   best_PRS_lasso2 <- select(PRS_lasso2_for_regression, all_of(col_select_lasso2))
   best_PRS_lasso2$Tool <- best_model
   best_PRS_lasso2$parameters <- best_parameters
@@ -1946,6 +2120,23 @@ if(nrow(Regression_results_valid_lasso2)==0){
   ggsave(paste0(out_lasso2, "/ROC_curve.svg"), ROC_lasso2, width=9, height=6)
 }
 
+#### Analysis with best PRS + covariates
+
+if (cov_analysis == TRUE) {
+  for (covs in covariate_list) {
+    PRS_test_lasso2_cov <- merge(best_PRS_lasso2, cov_data, by=c("FID", "IID"))
+    full_form <- paste("PHENO", "~", "score", "+", covs, sep="")
+    null_form <- paste("PHENO", "~", covs, sep="")
+    full_glm <- glm(full_form, data = PRS_test_lasso2_cov, family=binomial())
+    null_glm <- glm(null_form, data = PRS_test_lasso2_cov, family=binomial())
+    R2_full <- PseudoR2(full_glm, which="Nagelkerke")
+    R2_null <- PseudoR2(null_glm, which="Nagelkerke")
+    R2_PRS <- R2_full - R2_null
+    Regression_covariates <- rbind(Regression_covariates, c("lassosum2", R2_full, R2_null, R2_PRS, covs))
+    colnames(Regression_covariates) <- c("Tool", "R2_PRS_and_cov" , "R2_cov_only", "R2_PRS_only", "included_covariates")
+  }
+}
+
 #### Divide into cases and controls
 
 cases <- best_PRS_lasso2[(best_PRS_lasso2$PHENO==1),]
@@ -1954,6 +2145,10 @@ controls <- best_PRS_lasso2[(best_PRS_lasso2$PHENO==0),]
 #### Histogram
 
 histogram_case_control(case=cases, control=controls, data=best_PRS_lasso2, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_lasso2, "/Histogram_best_score_lassosum2.svg"))
+
+#### Density
+
+density_case_control(case=cases, control=controls, data=best_PRS_lasso2, score="score", group="PHENO", fill_color_1="cadetblue3", fill_color_2="mediumpurple", out=paste0(out_lasso2, "/Density_best_score_lassosum2.svg"))
 
 #### Boxplot
 
@@ -2044,6 +2239,15 @@ if (length(roc_list_2) > 0){
   ggsave(paste0(out_comparison, "/ROC_comparison.svg"),ROC_comparison,width=9, height=6)
 } else {
   cat("No valid PRS for ROC curve creation... exiting...")
+}
+
+#### Write results of covariate analysis to file, if it existed
+
+if (exists("Regression_covariates") && nrow(Regression_covariates) > 0) {
+  Regression_covariates$R2_PRS_and_cov <- as.numeric(Regression_covariates$R2_PRS_and_cov)
+  Regression_covariates$R2_cov_only <- as.numeric(Regression_covariates$R2_cov_only)
+  Regression_covariates$R2_PRS_only <- as.numeric(Regression_covariates$R2_PRS_only)
+  write.table(Regression_covariates, paste0(out_comparison, "/Regression_best_PRS_per_tool_with_covariates"), row.names = F, quote = F, sep="\t")
 }
 
 cat("Done comparing tools!\nPipeline completed!\n")
