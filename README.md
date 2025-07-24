@@ -60,7 +60,7 @@ conda activate STREAM-PRS
 
 - Tool: not necessary to download, they are integrated in the STREAM-PRS conda environment
   
-- Reference files: Use the following [link]([https://figshare.com/articles/dataset/LD_reference_for_HapMap3_/21305061](https://drive.usercontent.google.com/download?id=17dyKGA2PZjMsivlYb_AjDmuZjM1RIGvs&export=download&authuser=0)) to download the LD reference matrices. Download `ldref_hm3_plus.zip`. Then unzip the file:
+- Reference files: Use the following [link](https://drive.usercontent.google.com/download?id=17dyKGA2PZjMsivlYb_AjDmuZjM1RIGvs&export=download&authuser=0) to download the LD reference matrices. Download `ldref_hm3_plus.zip`. Then unzip the file:
 
   ```
   unzip ldref_hm3_plus.zip -d ldref_hm3_plus
@@ -86,7 +86,10 @@ To use the PRS pipeline, you need to edit the STREAM-PRS.bash file. Below you wi
 #### Model
 
 - binary_trait: fill in either TRUE (the trait you calculate PRS for is binary) or FALSE (the trait you calculate PRS for is quantitative)
-- cross-validation: fill in either TRUE (you want to use cross-validation) or FALSE (you do not want to use cross-validation)
+- cross_validation: fill in either TRUE (you want to use cross-validation) or FALSE (you do not want to use cross-validation)
+- covariates: fill in nothing if you wish to use no covariates; fill in comma separated list of covariates to include in the regression model
+  * e.g. "Age+Sex,Sex" will include results for PHENO ~ PRS + Age+Sex and for PHENO ~ PRS + Sex but NOT for PHENO ~ PRS + Age
+  * e.g. "Age,Sex" will include results for PHENO ~ PRS + Age and for PHENO ~ PRS + Sex, but NOT for PHENO ~ PRS + Age + Sex
 
 #### Output path
 
@@ -147,6 +150,12 @@ To use the PRS pipeline, you need to edit the STREAM-PRS.bash file. Below you wi
 - PC_test: fill in the full path to the file containing the first x principal components of the test data
 
 *Note: this files should be in the following format: FID IID PC1 PC2 ... PCX. The number of PCs that you use is optional, but the number should be the same for the training and test data. The file should only include FID, IID and PCs, no additional columns*
+
+#### Covariate file
+
+- cov_file: fill in the full path to the file containing the covariates you would like to include in the regression model for the best PRS
+
+*Note: this file should be in the following format: FID IID Cov_1 Cov_2 ... Cov_X Do not included PCs here!*
 
 #### Cores
 
@@ -209,6 +218,9 @@ The file starts with all the parameters that should be filled in (see above). Th
 - `LDpred2_and_lassosum2.r`: runs LDpred2 and lassosum2
 - `get_best_PRS.r` **OR** `get_best_PRS_linear.r` (depending on if the phenotype is indicated to be binary or not): PC-corrects and standardizes all scores. Then selects the best score per tool and across all tools.
 
+
+*Note: if some files give 'Permission denied' errors try using chmod + file to change the file permissions*
+
 #### Note on LDpred2 and lassosum2
 
 For some GWAS, an additional filtering step is necessary to get results from LDpred2 and lassosum2. For this reason, an additional script is provided: `LDpred2_and_lassosum2_extra_QC.r`. In the STREAM-PRS.bash script, just replace `LDpred2_and_lassosum2.r` with `LDpred2_and_lassosum2_extra_QC.r`.
@@ -223,13 +235,13 @@ Various output files can be found for each tool in the corresponding folders and
 
 - Raw scores for the training and the test data
 - PC-corrected and standardized scores for the training (training_prefix_scaled_scores) and test data (test_prefix_scaled_scores)
-- Regression_results_Tool: contains for each parameter setting the Beta, standard error (SE), P_value, Odds ratio (OR), confidence interval (CI_low and CI_up), variance explained (R2). Example for PRSice results:
+- Regression_results_Tool: contains for each parameter setting the Beta, standard error (SE), P_value, Odds ratio (OR), confidence interval (CI_low and CI_up), variance explained according to Nagelkerke R² (R2), variance explained according to Cox-Snell R² (R2_Cox). Example for PRSice results:
 
 ```
-Tool      Parameters    Beta        SE            P_value       OR            CI_low        CI_up       R2
-PRSice    Pt_5e.08      0.04904     0.11599       0.06724       1.05026       0.93734       1.32003     0.00408
-PRSice    Pt_1e.05      0.07161     0.11696       0.05403       1.09308       0.94100       1.17275     0.00839
-PRSice    Pt_0.0001     0.09698     0.11587       0.04026       1.10184       1.07858       1.38445     0.01573
+Tool      Parameters    Beta        SE            P_value       OR            CI_low        CI_up       R2         R2_Cox
+PRSice    Pt_5e.08      0.04904     0.11599       0.06724       1.05026       0.93734       1.32003     0.00408    0.00102
+PRSice    Pt_1e.05      0.07161     0.11696       0.05403       1.09308       0.94100       1.17275     0.00839    0.00234
+PRSice    Pt_0.0001     0.09698     0.11587       0.04026       1.10184       1.07858       1.38445     0.01573    0.01002
 ``` 
 
 - bar_plot_R2_Tool.svg: bar plot that shows the R² per parameter setting
@@ -246,11 +258,13 @@ FID     IID     score                   Tool    parameters
 
 - Boxplot_Tool.svg (for binary traits only): Boxplot showing the scores of cases vs. controls, only for the best parameter settings
 - Histogram_best_score_Tool.svg (for binary traits only): Histogram showing the scores of cases vs. controls, only for the best parameter settings
+- Density_best_score_Tool.svg (for binary traits only): Density plot showing the scores of cases vs. controls, only for the best parameter settings
 - Correlation.svg (for quantitative traits only): Correlation between PC-corrected and standardized PRS and the phenotype of the individuals
 
 ### Output files in comparison folder
 
 - Regression_results_best_per_tool: contains for the best parameter settings per tool the beta, SE, P_value, OR, CI_low, CI_up and R2
+- Regression_best_PRS_per_tool_with_covariates (only if covariates were provided): contains for the best parameter settings per tool the R2_PRS_and_cov (R² obtained for regression model using PRS and covariates) , R2_cov_only (R² obtained for regression model using covariates only (no PRS)), R2_PRS_only (R² obtained from regression model using PRS only (no covariates)) and included_covariates (which covariates were used in the regression model)
 - Bar_plot_comparison_R2_per_tool.svg: figure with the R² per tool shown as a bar plot
 - Summary_AUC_per_tool.txt: contains for the best parameter settings per tool the AUC and it's 95% confidence interval (CI_low and CI_up)
 - ROC_comparison.svg: ROC plot with one curve per tool
