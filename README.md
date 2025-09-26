@@ -60,7 +60,7 @@ conda activate STREAM-PRS
 
 - Tool: not necessary to download, they are integrated in the STREAM-PRS conda environment
   
-- Reference files: Use the following [link](https://drive.usercontent.google.com/download?id=17dyKGA2PZjMsivlYb_AjDmuZjM1RIGvs&export=download&authuser=0) to download the LD reference matrices. Download `ldref_hm3_plus.zip`. Then unzip the file:
+- Reference files: Use this [link](https://figshare.com/ndownloader/files/37802721) to download the map file.  Use the following [link](https://drive.usercontent.google.com/download?id=17dyKGA2PZjMsivlYb_AjDmuZjM1RIGvs&export=download&authuser=0) to download the LD reference matrices. Download `ldref_hm3_plus.zip`. Then unzip the file:
 
   ```
   unzip ldref_hm3_plus.zip -d ldref_hm3_plus
@@ -187,8 +187,9 @@ To use the PRS pipeline, you need to edit the STREAM-PRS.bash file. Below you wi
 
 #### LDpred2 and lassosum2 specific parameters
 
-*Note: Make sure that you specifiy ldref_hm3_plus, adapting the other parameters is optional.*
+*Note: Make sure that you specifiy map_hm3_plus and ldref_hm3_plus, adapting the other parameters is optional.*
 
+- map_hm3_plus: fill in the name of the map file (+ directory where it is stored)
 - ldref_hm3_plus: fill in the full path to the directory that contains the LD reference matrices for LDpred2 and lassosum2
 - values_h2_grid: fill in a list of values that will be used to change the estimated heritability value in the grid model (default: "c(0.3, 0.7, 1, 1.4)")
 - values_p_grid: fill in which values for the proportion of causal variants (p) should be tested in the grid model (default: "seq_log(1e-5, 1, length.out = 21)")
