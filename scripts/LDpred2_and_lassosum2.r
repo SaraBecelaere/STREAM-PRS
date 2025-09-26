@@ -54,11 +54,11 @@ nlambda <- as.numeric(nlambda)
 min_ratio <- args[23]
 min_ratio <- as.numeric(min_ratio)
 
+map_path <- args[24]
+
 cat("Starting LDpred2...\n")
 
-map <- readRDS(runonce::download_file(
-  "https://figshare.com/ndownloader/files/37802721",
-  dir = paste0(out_LDpred2, "/tmp-data"), fname = "map_hm3_plus.rds"))
+map <- readRDS(paste0(map_path))
   
 sumstats <- bigreadr::fread2(ss)
 sumstats$chr <- as.numeric(pull(sumstats, CHR_col))

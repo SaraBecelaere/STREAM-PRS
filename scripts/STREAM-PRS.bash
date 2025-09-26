@@ -78,6 +78,7 @@ reference_files_PRScs=""
 phi_values="1e+00,1e-02,1e-04,1e-06"
 
 #LDpred2 and lassosum2 specific parameters
+map_hm3_plus=""
 ldref_hm3_plus=""
 values_h2_grid="c(0.3, 0.7, 1, 1.4)"
 values_p_grid="seq_log(1e-5, 1, length.out = 21)"
@@ -123,7 +124,7 @@ Rscript lassosum.r "$test_file_prefix" "$test_file" "$edited_GWAS_file" "$traini
 ./PRS_CS.bash "$PRScs_path" "$edited_GWAS_for_PRS_CS" "$test_file_rsID" "$test_file_prefix" "$training_file_rsID" "$training_file_prefix" "$out_PRScs" "$reference_files_PRScs" "$GWAS_size" "$phi_values"
 
 #Run LDPred-2 and lassosum2
-Rscript LDpred2_and_lassosum2.r "$edited_GWAS_for_LDpred2" "$training_file_rsID_prefix" "$training_file_rsID" "$test_file_rsID_prefix" "$test_file_rsID" "$rsID_col" "$chromosome_col" "$pos_col" "$effect_allele" "$noneffect_allele" "$N_col" "$beta_se_col" "$allele_freq_col" "$out_LDpred2" "$out_lasso2" "$ldref_hm3_plus" "$cores" "$values_h2_grid" "$values_p_grid" "$initial_p_auto_grid" "$delta" "$nlambda" "$lambda_min_ratio"
+Rscript LDpred2_and_lassosum2.r "$edited_GWAS_for_LDpred2" "$training_file_rsID_prefix" "$training_file_rsID" "$test_file_rsID_prefix" "$test_file_rsID" "$rsID_col" "$chromosome_col" "$pos_col" "$effect_allele" "$noneffect_allele" "$N_col" "$beta_se_col" "$allele_freq_col" "$out_LDpred2" "$out_lasso2" "$ldref_hm3_plus" "$cores" "$values_h2_grid" "$values_p_grid" "$initial_p_auto_grid" "$delta" "$nlambda" "$lambda_min_ratio" "$map_hm3_plus"
 
 #Get best PRS
 if [ "$binary_trait" == "TRUE" ]; then
