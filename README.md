@@ -272,7 +272,7 @@ FID     IID     score                   Tool    parameters
 
 ## Citation
 
-If you use STREAM-PRS, please cite our paper. Becelaere S., Abakkouy Y. et al. STREAM-PRS: A multi-tool pipeline for streamlining Polygenic Risk Score computation (2025). Currently, the paper is not yet published.
+If you use STREAM-PRS, please cite our paper. Becelaere, S., Abakkouy, Y. et al. STREAM-PRS: a multi-tool pipeline for streamlining polygenic risk score computation. Genome Med 17, 119 (2025). https://doi.org/10.1186/s13073-025-01539-0
 
 ## Contact
 
